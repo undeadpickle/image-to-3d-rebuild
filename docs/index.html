@@ -1,0 +1,1511 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<style>:root{padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)} body{margin:0;font:14px system-ui,-apple-system,sans-serif} [hidden]{display:none!important}</style>
+</head>
+<body>
+<title>Treasure Chest Viewer</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Spectral+SC:wght@600&family=Figtree:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap">
+<style>
+  /* Layout: full-bleed 3D stage, a title plate up top, a brass-trimmed control tray at the bottom. One deliberate dark look (an item-inspect screen). */
+  :root {
+    --bg: #080605;          /* walnut shadow */
+    --tray: rgba(34, 26, 20, 0.86);
+    --fg: #f2e7d6;          /* parchment */
+    --muted: #b6a48d;
+    --brass: #d6a64a;
+    --brass-ink: #22180c;
+    --line: rgba(242, 231, 214, 0.14);
+    --chip: rgba(242, 231, 214, 0.07);
+    --f-display: "Spectral SC", "Iowan Old Style", Georgia, serif;
+    --f-body: "Figtree", system-ui, -apple-system, "Segoe UI", sans-serif;
+    --f-mono: "JetBrains Mono", ui-monospace, "SF Mono", Menlo, monospace;
+    color-scheme: dark;
+  }
+  html, body { height: 100%; }
+  [hidden] { display: none !important; }
+  body { background: var(--bg); color: var(--fg); font-family: var(--f-body); overflow: hidden; -webkit-tap-highlight-color: transparent; }
+  #stage { position: fixed; inset: 0; }
+  #stage canvas { display: block; width: 100%; height: 100%; touch-action: none; }
+
+  .plate {
+    position: fixed; top: 0; left: 0; right: 0; pointer-events: none;
+    padding-top: calc(14px + env(safe-area-inset-top, 0px));
+    padding-left: max(16px, env(safe-area-inset-left, 0px));
+    padding-right: max(16px, env(safe-area-inset-right, 0px));
+    padding-bottom: 28px;
+    background: linear-gradient(to bottom, rgba(8, 6, 5, 0.85), rgba(8, 6, 5, 0));
+    display: flex; flex-direction: column; gap: 4px;
+  }
+  .plate h1 { margin: 0; font-family: var(--f-display); font-weight: 600; font-size: 1.55rem; letter-spacing: 0.04em; line-height: 1.1; text-wrap: balance; }
+  .plate .sub { margin: 0; color: var(--muted); font-size: 0.86rem; }
+  .stats { font-family: var(--f-mono); font-size: 0.74rem; color: var(--brass); letter-spacing: 0.02em; font-variant-numeric: tabular-nums; }
+
+  .tray {
+    position: fixed; left: 0; right: 0; bottom: 0;
+    padding-left: max(16px, env(safe-area-inset-left, 0px));
+    padding-right: max(16px, env(safe-area-inset-right, 0px));
+    padding-top: 14px;
+    padding-bottom: calc(14px + env(safe-area-inset-bottom, 0px));
+    background: var(--tray);
+    border-top: 1px solid rgba(214, 166, 74, 0.35);
+    backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px);
+    display: flex; justify-content: center;
+  }
+  .tray-inner { width: 100%; max-width: 560px; display: grid; gap: 12px; }
+
+  .seg { display: grid; grid-template-columns: 1fr 1fr; background: var(--chip); border: 1px solid var(--line); border-radius: 10px; padding: 3px; gap: 3px; }
+  .seg button { appearance: none; border: 0; background: transparent; color: var(--muted); font: 500 0.86rem/1 var(--f-body); padding: 10px 8px; border-radius: 7px; cursor: pointer; min-width: 0; }
+  .seg button[aria-pressed="true"] { background: var(--fg); color: var(--brass-ink); }
+
+  .row { display: flex; align-items: center; gap: 12px; }
+  .primary {
+    appearance: none; border: 0; cursor: pointer; flex: 0 0 auto;
+    background: var(--brass); color: var(--brass-ink);
+    font: 600 0.95rem/1 var(--f-body); padding: 13px 18px; border-radius: 10px; min-width: 112px;
+    box-shadow: inset 0 -2px 0 rgba(0, 0, 0, 0.22), inset 0 1px 0 rgba(255, 240, 200, 0.45);
+  }
+  .primary:disabled { opacity: 0.4; cursor: not-allowed; }
+  .slider { flex: 1 1 auto; min-width: 0; display: grid; gap: 4px; }
+  .slider label { display: flex; justify-content: space-between; font-size: 0.74rem; color: var(--muted); text-transform: uppercase; letter-spacing: 0.08em; }
+  .slider label output { font-family: var(--f-mono); color: var(--fg); letter-spacing: 0; text-transform: none; font-variant-numeric: tabular-nums; }
+  input[type="range"] { width: 100%; accent-color: var(--brass); margin: 0; }
+  input[type="range"]:disabled { opacity: 0.4; }
+
+  .chips { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+  .chip { appearance: none; cursor: pointer; border: 1px solid var(--line); background: var(--chip); color: var(--fg); font: 500 0.8rem/1 var(--f-body); padding: 8px 12px; border-radius: 999px; }
+  .chip[aria-pressed="true"] { border-color: var(--brass); color: var(--brass); }
+  .chip:disabled { opacity: 0.4; cursor: not-allowed; }
+  .lightpanel { display: grid; gap: 10px; padding-bottom: 4px; border-bottom: 1px solid var(--line); }
+  .swatches { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+  .sw { appearance: none; width: 28px; height: 28px; border-radius: 50%; border: 2px solid var(--line); cursor: pointer; padding: 0; }
+  .sw[aria-pressed="true"] { border-color: var(--fg); box-shadow: 0 0 0 2px var(--brass); }
+  .custom { display: flex; align-items: center; gap: 6px; font-size: 0.78rem; color: var(--muted); margin-left: 4px; }
+  .custom input { width: 34px; height: 28px; border: 1px solid var(--line); border-radius: 6px; background: transparent; padding: 0; }
+  .hint { margin-left: auto; color: var(--muted); font-size: 0.74rem; }
+
+  button:focus-visible, input:focus-visible { outline: 2px solid var(--brass); outline-offset: 2px; }
+
+  .loader { position: fixed; inset: 0; display: grid; place-items: center; pointer-events: none; color: var(--muted); font-family: var(--f-mono); font-size: 0.8rem; }
+  .toast {
+    position: fixed; left: 50%; transform: translateX(-50%); bottom: calc(210px + env(safe-area-inset-bottom, 0px));
+    background: rgba(12, 9, 7, 0.9); color: var(--fg); border: 1px solid var(--line);
+    padding: 10px 14px; border-radius: 10px; font-size: 0.84rem; max-width: calc(100% - 32px); text-align: center;
+    opacity: 0; transition: opacity 0.25s ease; pointer-events: none;
+  }
+  .toast.show { opacity: 1; }
+  @media (max-width: 420px) { .hint { display: none; } .plate h1 { font-size: 1.35rem; } }
+  @media (prefers-reduced-motion: reduce) { .toast { transition: none; } }
+</style>
+
+<div id="stage" aria-label="3D view of the treasure chest. Drag to orbit, pinch or scroll to zoom, tap the chest to open it."></div>
+
+<header class="plate">
+  <h1>Treasure Chest</h1>
+  <p class="sub" id="sub">Rebuilt in Godot from a Meshy 7 scan</p>
+  <div class="stats" id="stats">Loading…</div>
+</header>
+
+<div class="loader" id="loader">Loading chest…</div>
+<div class="toast" id="toast" role="status" aria-live="polite"></div>
+
+<nav class="tray" aria-label="Viewer controls">
+  <div class="tray-inner">
+    <div class="seg" role="group" aria-label="Model">
+      <button id="m-rebuilt" type="button" aria-pressed="true">Rebuilt in Godot</button>
+      <button id="m-meshy" type="button" aria-pressed="false">Meshy 7 original</button>
+    </div>
+    <div class="row">
+      <button class="primary" id="toggle" type="button">Open lid</button>
+      <div class="slider">
+        <label for="lid">Lid angle <output id="lid-out" for="lid">0°</output></label>
+        <input id="lid" type="range" min="0" max="110" step="1" value="0">
+      </div>
+    </div>
+    <div class="lightpanel" id="lightpanel" hidden>
+      <div class="slider">
+        <label for="l-int">Spotlight <output id="l-int-out" for="l-int">100%</output></label>
+        <input id="l-int" type="range" min="0" max="200" step="1" value="100">
+      </div>
+      <div class="slider">
+        <label for="l-rad">Light radius <output id="l-rad-out" for="l-rad">1.10 m</output></label>
+        <input id="l-rad" type="range" min="40" max="220" step="1" value="110">
+      </div>
+      <div class="swatches" role="group" aria-label="Light color">
+        <button class="sw" type="button" data-c="#ffe2b8" aria-pressed="true" aria-label="Candle white" style="background:#ffe2b8"></button>
+        <button class="sw" type="button" data-c="#ffc061" aria-pressed="false" aria-label="Gold" style="background:#ffc061"></button>
+        <button class="sw" type="button" data-c="#ff8a4a" aria-pressed="false" aria-label="Ember" style="background:#ff8a4a"></button>
+        <button class="sw" type="button" data-c="#b9c9ff" aria-pressed="false" aria-label="Moonlight" style="background:#b9c9ff"></button>
+        <button class="sw" type="button" data-c="#c49bff" aria-pressed="false" aria-label="Arcane violet" style="background:#c49bff"></button>
+        <button class="sw" type="button" data-c="#7fffd2" aria-pressed="false" aria-label="Spirit green" style="background:#7fffd2"></button>
+        <label class="custom" for="l-col">Custom <input id="l-col" type="color" value="#ffe2b8"></label>
+      </div>
+    </div>
+    <div class="chips">
+      <button class="chip" id="lightbtn" type="button" aria-pressed="false" aria-expanded="false" aria-controls="lightpanel">Light</button>
+      <button class="chip" id="paint" type="button" aria-pressed="true">Meshy paint</button>
+      <button class="chip" id="spin" type="button" aria-pressed="true">Spin</button>
+      <button class="chip" id="wire" type="button" aria-pressed="false">Wireframe</button>
+      <button class="chip" id="vacuum" type="button" aria-pressed="true">On close: vacuum loot back</button>
+      <span class="hint">Drag to orbit · tap the chest</span>
+    </div>
+  </div>
+</nav>
+
+<script type="importmap">
+{ "imports": {
+  "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+  "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
+} }
+</script>
+<script type="module">
+import * as THREE from "three";
+import { OrbitControls } from "three/addons/controls/OrbitControls.js";
+import { GLTFLoader } from "three/addons/loaders/GLTFLoader.js";
+import { RoomEnvironment } from "three/addons/environments/RoomEnvironment.js";
+import { EffectComposer } from "three/addons/postprocessing/EffectComposer.js";
+import { RenderPass } from "three/addons/postprocessing/RenderPass.js";
+import { UnrealBloomPass } from "three/addons/postprocessing/UnrealBloomPass.js";
+import { OutputPass } from "three/addons/postprocessing/OutputPass.js";
+import { ShaderPass } from "three/addons/postprocessing/ShaderPass.js";
+
+const MAX_OPEN = 110;
+const reduceMotion = matchMedia("(prefers-reduced-motion: reduce)").matches;
+const $ = (id) => document.getElementById(id);
+
+// ---------- renderer / scene
+const stage = $("stage");
+const renderer = new THREE.WebGLRenderer({ antialias: true });
+renderer.setPixelRatio(Math.min(devicePixelRatio, Math.min(innerWidth, innerHeight) < 700 ? 1.6 : 2));
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
+renderer.toneMappingExposure = 1.3;
+renderer.shadowMap.enabled = true;
+renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+stage.appendChild(renderer.domElement);
+
+const scene = new THREE.Scene();
+const BG = new THREE.Color("#080605");
+scene.background = BG;
+scene.fog = new THREE.Fog(BG, 3.0, 7.0);
+const pmrem = new THREE.PMREMGenerator(renderer);
+scene.environment = pmrem.fromScene(new RoomEnvironment(renderer), 0.04).texture;
+
+const camera = new THREE.PerspectiveCamera(32, 1, 0.05, 50);
+let camShake = 0;
+const camShakeOff = new THREE.Vector3();
+const controls = new OrbitControls(camera, renderer.domElement);
+controls.target.set(0, 0.36, 0);
+camera.position.set(-0.62, 0.78, 1.0);
+controls.enableDamping = true;
+controls.enablePan = false;
+controls.minDistance = 1.2;
+controls.maxDistance = 16;
+controls.maxPolarAngle = Math.PI * 0.49;
+controls.autoRotate = !reduceMotion;
+controls.autoRotateSpeed = 0.8;
+
+const key = new THREE.DirectionalLight("#fff1dc", 0.22);
+key.position.set(-2.2, 3.4, 2.6);
+key.castShadow = false;
+key.shadow.mapSize.set(2048, 2048);
+Object.assign(key.shadow.camera, { left: -1.2, right: 1.2, top: 1.2, bottom: -1.2, near: 0.5, far: 10 });
+key.shadow.bias = -0.0004;
+key.shadow.normalBias = 0.02;
+scene.add(key);
+const rim = new THREE.DirectionalLight("#9fb3ff", 0.35);
+rim.position.set(2.5, 1.6, -2.5);
+scene.add(rim);
+scene.add(new THREE.HemisphereLight("#e8dccb", "#2a1d13", 0.12));
+
+const floor = new THREE.Mesh(new THREE.CircleGeometry(12, 64), new THREE.MeshStandardMaterial({ color: "#1c1510", roughness: 0.9, envMapIntensity: 0.03 }));
+floor.rotation.x = -Math.PI / 2;
+floor.receiveShadow = true;
+scene.add(floor);
+
+// ---------- procedural materials (ports of wood.gdshader / brass.gdshader)
+const GLSL_COMMON = `
+varying vec3 vLpos;
+float hsh(vec2 p){ return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
+float vn(vec2 p){ vec2 i = floor(p); vec2 f = fract(p); vec2 u = f*f*(3.0-2.0*f);
+  return mix(mix(hsh(i), hsh(i+vec2(1.0,0.0)), u.x), mix(hsh(i+vec2(0.0,1.0)), hsh(i+vec2(1.0,1.0)), u.x), u.y); }
+float fb(vec2 p){ float v = 0.0; float a = 0.5; for (int k = 0; k < 4; k++) { v += a*vn(p); p *= 2.03; a *= 0.5; } return v; }
+vec3 s2l(vec3 c){ return pow(c, vec3(2.2)); }
+float gA; float gB;
+#ifdef CHEST_BAKED
+varying vec2 vBakeUv;
+uniform sampler2D bakeMap; uniform sampler2D ormMap; uniform float uBake; uniform float uDebug;
+vec4 gOrm; float gBm;
+#endif
+`;
+// Meshy's paint, baked into a second UV set. Alpha = transfer confidence; 0 falls back to the procedural shader.
+const BAKE_COLOR = `
+#ifdef CHEST_BAKED
+  vec4 bk = texture2D(bakeMap, vBakeUv);
+  gOrm = texture2D(ormMap, vBakeUv);
+  gBm = bk.a * uBake;
+  diffuseColor.rgb = mix(diffuseColor.rgb, bk.rgb, gBm);
+  diffuseColor.rgb = mix(diffuseColor.rgb, diffuseColor.rgb * 1.2, vColor.g * 0.35 * gBm);
+  diffuseColor.rgb = mix(diffuseColor.rgb, vec3(1.0, 0.0, 1.0), uDebug * (1.0 - bk.a));
+#endif`;
+const BAKE_ROUGH = `
+#ifdef CHEST_BAKED
+  roughnessFactor = mix(roughnessFactor, gOrm.g, gOrm.a * uBake);
+#endif`;
+const BAKE_METAL = `float metalnessFactor = metalness;
+#ifdef CHEST_BAKED
+  metalnessFactor = mix(metalnessFactor, gOrm.b, gOrm.a * uBake);
+#endif`;
+const BAKE_U = { bakeMap: { value: null }, ormMap: { value: null }, uBake: { value: 1 }, uDebug: { value: location.hash === "#coverage" ? 1 : 0 } };
+const v3 = (c) => `vec3(${c.map((x) => x.toFixed(3)).join(",")})`;
+function woodGLSL(a, b, g) {
+  return `
+  float tint = vColor.r; float edge = vColor.g;
+  vec2 wuv = vUv + vec2(tint * 13.7, tint * 5.3);
+  vec3 baseA = s2l(${v3(a)}), baseB = s2l(${v3(b)}), grain = s2l(${v3(g)});
+  float warp = fb(vec2(wuv.x * 1.6, wuv.y * 5.0));
+  float lines = fb(vec2(wuv.x * 1.2, wuv.y * 26.0 + warp * 5.0));
+  float streak = smoothstep(0.5, 0.8, lines);
+  float row = wuv.y * 13.0 + warp * 0.7;
+  float l = abs(fract(row) - 0.5);
+  float thin = smoothstep(0.07, 0.015, l) * smoothstep(0.35, 0.6, vn(vec2(wuv.x * 2.2, floor(row) * 3.1)));
+  vec2 kc = vec2(wuv.x * 1.3 + tint, wuv.y * 5.5 + tint * 2.0);
+  vec2 kp = vec2(fract(kc.x) - 0.5, (fract(kc.y) - 0.5) * 0.35);
+  float knot = smoothstep(0.035, 0.0, length(kp) - 0.01) * step(0.62, hsh(floor(kc)));
+  vec3 c = mix(baseA, baseB, fb(wuv * vec2(2.5, 9.0)));
+  c = mix(c, grain, streak * 0.4);
+  c = mix(c, grain * 0.8, thin * 0.75);
+  c = mix(c, grain * 0.7, knot * 0.8);
+  c *= 0.94 + 0.1 * vn(vec2(wuv.x * 6.0, wuv.y * 160.0));
+  c *= mix(0.84, 1.1, tint);
+  c = mix(c, c * 1.45 + vec3(0.04, 0.02, 0.0), edge * 0.8);
+  diffuseColor.rgb = c;
+  gA = streak;`;
+}
+const BRASS_GLSL = `
+  float n = fb(vLpos.xy * 38.0 + vLpos.z * 23.0);
+  float spots = smoothstep(0.66, 0.8, fb(vLpos.zy * 55.0 + vLpos.x * 41.0));
+  vec3 dk = s2l(vec3(0.21, 0.18, 0.08)), lt = s2l(vec3(0.52, 0.46, 0.25));
+  vec3 c = mix(dk, lt, 0.45 + 0.4 * (n - 0.5));
+  c = mix(c, dk * 0.7, spots * 0.45);
+  c = mix(c, lt * 1.25, vColor.g * 0.7);
+  diffuseColor.rgb = c;
+  gA = n; gB = vColor.g;`;
+
+function procMaterial(key, colorCode, roughCode, metalness, baked = false) {
+  const m = new THREE.MeshStandardMaterial({ vertexColors: true, metalness, roughness: 0.7, envMapIntensity: 0.3 });
+  m.customProgramCacheKey = () => "chest-" + key;
+  m.defines = baked ? { USE_UV: "", USE_UV1: "", CHEST_BAKED: "" } : { USE_UV: "" };
+  m.onBeforeCompile = (sh) => {
+    if (baked) Object.assign(sh.uniforms, BAKE_U);
+    sh.vertexShader = sh.vertexShader
+      .replace("#include <common>", "#include <common>\nvarying vec3 vLpos;" + (baked ? "\nvarying vec2 vBakeUv;" : ""))
+      .replace("#include <begin_vertex>", "#include <begin_vertex>\nvLpos = position;" + (baked ? "\nvBakeUv = uv1;" : ""));
+    sh.fragmentShader = sh.fragmentShader
+      .replace("#include <common>", "#include <common>\n" + GLSL_COMMON)
+      .replace("#include <color_fragment>", colorCode + BAKE_COLOR)
+      .replace("#include <roughnessmap_fragment>", roughCode + BAKE_ROUGH)
+      .replace("#include <metalnessmap_fragment>", BAKE_METAL);
+  };
+  return m;
+}
+const MATS = {
+  wood: procMaterial("wood", woodGLSL([0.40, 0.21, 0.10], [0.60, 0.35, 0.18], [0.22, 0.10, 0.045]), "float roughnessFactor = 0.8 - gA * 0.1;", 0.0, true),
+  wood_dark: procMaterial("wood_dark", woodGLSL([0.24, 0.11, 0.05], [0.34, 0.16, 0.07], [0.15, 0.06, 0.03]), "float roughnessFactor = 0.85;", 0.0),
+  brass: procMaterial("brass", BRASS_GLSL, "float roughnessFactor = clamp(mix(0.38, 0.7, gA) - gB * 0.15, 0.05, 1.0);", 0.5, true),
+  gold: new THREE.MeshStandardMaterial({ color: "#ffc247", metalness: 1, roughness: 0.28, emissive: "#8c5c14", emissiveIntensity: 0.6 }),
+  gold_pile: new THREE.MeshStandardMaterial({ color: "#9e6b1f", metalness: 0.8, roughness: 0.5 }),
+  dark: new THREE.MeshStandardMaterial({ color: "#080504", roughness: 1 }),
+};
+
+// ---------- models
+const loader = new GLTFLoader();
+const models = { rebuilt: null, meshy: null };
+let current = "rebuilt";
+let pivot = null, glow = null;
+let open = 0, target = 0, animFrom = 0, animStart = 0, animDur = 0, animEase = null;
+
+function countTris(root) {
+  let t = 0;
+  root.traverse((o) => { if (o.isMesh) { const g = o.geometry; t += (g.index ? g.index.count : g.attributes.position.count) / 3; } });
+  return Math.round(t);
+}
+function prep(root) {
+  root.traverse((o) => { if (o.isMesh) { o.castShadow = true; o.receiveShadow = true; } });
+}
+const fmt = (n) => n.toLocaleString("en-US");
+// Models ship as base64 text files; decode and hand the bytes to GLTFLoader.
+async function loadGLB(url) {
+  const res = await fetch(url);
+  if (!res.ok) throw new Error(res.status);
+  const bin = atob((await res.text()).trim());
+  const bytes = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+  return loader.parseAsync(bytes.buffer, "");
+}
+
+function loadTex(url, srgb) {
+  return new THREE.TextureLoader().loadAsync(url).then((t) => {
+    t.flipY = false;
+    t.colorSpace = srgb ? THREE.SRGBColorSpace : THREE.NoColorSpace;
+    t.anisotropy = 4;
+    return t;
+  });
+}
+Promise.all([loadGLB("chest_baked.glb.txt"), loadTex("chest_baked_albedo.webp", true), loadTex("chest_baked_orm.webp", false)]).then(([gltf, alb, orm]) => {
+  BAKE_U.bakeMap.value = alb;
+  BAKE_U.ormMap.value = orm;
+  const root = gltf.scene;
+  root.traverse((o) => {
+    if (!o.isMesh) return;
+    const name = (o.material.name || "").replace(/\d+$/, "");
+    if (MATS[name]) o.material = MATS[name];
+  });
+  prep(root);
+  pivot = root.getObjectByName("LidPivot");
+  buildArtifacts(root);
+  glow = new THREE.PointLight("#ffc56b", 0, 1.6, 2);
+  glow.position.set(0, 0.7, 0.05);
+  root.add(glow);
+  root.userData.tris = countTris(root);
+  models.rebuilt = root;
+  scene.add(root);
+  $("loader").hidden = true;
+  setModel("rebuilt");
+  prewarm();
+}).catch(() => { $("loader").textContent = "Couldn't load the chest model. Reload the page to try again."; });
+
+let meshyLoading = false;
+function loadMeshy() {
+  if (meshyLoading) return;
+  meshyLoading = true;
+  $("loader").hidden = false;
+  $("loader").textContent = "Loading Meshy model…";
+  loadGLB("meshy.glb.txt").then((gltf) => {
+    const root = gltf.scene;
+    prep(root);
+    root.traverse((o) => { if (o.isMesh) o.material.envMapIntensity = 0.55; });
+    const box = new THREE.Box3().setFromObject(root);
+    const size = box.getSize(new THREE.Vector3());
+    const s = 1.07 / size.x;
+    root.scale.setScalar(s);
+    const c = box.getCenter(new THREE.Vector3());
+    root.position.set(-c.x * s, -box.min.y * s, -c.z * s);
+    root.userData.tris = countTris(root);
+    models.meshy = root;
+    root.visible = false;
+    scene.add(root);
+    $("loader").hidden = true;
+    if (current === "meshy") setModel("meshy");
+  }).catch(() => { meshyLoading = false; $("loader").textContent = "Couldn't load the Meshy model. Tap Meshy 7 original to try again."; });
+}
+
+function setModel(which) {
+  current = which;
+  $("m-rebuilt").setAttribute("aria-pressed", which === "rebuilt");
+  $("m-meshy").setAttribute("aria-pressed", which === "meshy");
+  if (which === "meshy" && !models.meshy) { loadMeshy(); }
+  for (const k of Object.keys(models)) if (models[k]) models[k].visible = k === which;
+  const m = models[which];
+  const canOpen = which === "rebuilt";
+  $("toggle").disabled = !canOpen;
+  $("lid").disabled = !canOpen;
+  $("paint").disabled = !canOpen;
+  if (which === "rebuilt") {
+    $("sub").textContent = "Rebuilt in Godot from a Meshy 7 scan";
+    const paint = BAKE_U.uBake.value > 0.5 ? "Meshy paint baked on" : "procedural paint";
+    $("stats").textContent = m ? `${fmt(m.userData.tris)} tris · hinged lid · ${paint}` : "Loading…";
+  } else {
+    $("sub").textContent = "Meshy 7 output, straight from Higgsfield";
+    $("stats").textContent = m ? `${fmt(m.userData.tris)} tris · one fused mesh · 11.6 MB file` : "Loading…";
+  }
+  applyWire();
+}
+
+// ---------- lid animation
+const easeOutBack = (t) => { const c1 = 1.4, c3 = c1 + 1; return 1 + c3 * Math.pow(t - 1, 3) + c1 * Math.pow(t - 1, 2); };
+const easeOutBounce = (t) => {
+  const n = 7.5625, d = 2.75;
+  if (t < 1 / d) return n * t * t;
+  if (t < 2 / d) return n * (t -= 1.5 / d) * t + 0.75;
+  if (t < 2.5 / d) return n * (t -= 2.25 / d) * t + 0.9375;
+  return n * (t -= 2.625 / d) * t + 0.984375;
+};
+function animateTo(to) {
+  animFrom = open; target = to; animStart = performance.now();
+  const opening = to > open;
+  animDur = reduceMotion ? 1 : (opening ? 750 : 520);
+  animEase = opening ? easeOutBack : easeOutBounce;
+}
+function setOpen(v) {
+  open = v;
+  if (pivot) pivot.rotation.x = -THREE.MathUtils.degToRad(MAX_OPEN) * open;
+  if (glow) glow.intensity = 7 * THREE.MathUtils.smoothstep(open, 0.1, 0.6);
+  if (current === "rebuilt" && open > 0.35 && !burstFired) fireBurst(performance.now());
+  open = Math.max(open, 0);
+  if (open < 0.12 && burstFired) { if (vacuumMode) recallLoot(); burstFired = false; }
+  const deg = Math.round(THREE.MathUtils.clamp(open, 0, 1) * MAX_OPEN);
+  $("lid").value = deg;
+  $("lid-out").textContent = `${deg}°`;
+  $("toggle").textContent = target > 0.5 ? "Close lid" : "Open lid";
+}
+// Opening with anticipation: the chest rattles and rocks, the lid strains against
+// the latch a few times, then snaps open, overshoots and springs back to rest.
+const bump = (t, a, b) => (t <= a || t >= b ? 0 : Math.sin(Math.PI * (t - a) / (b - a)));
+const easeOutCubic = (u) => 1 - Math.pow(1 - u, 3);
+const SNAP_AT = 1000, SNAP_LEN = 200, SEQ_END = 1900;
+function openTimeline(t) {
+  const env = bump(t, 0, 380) * 0.6 + bump(t, 540, 1010);
+  const rock = env * 0.065 * Math.sin(2 * Math.PI * 7.5 * t / 1000);
+  let lift = 0.5 * Math.abs(Math.sin(rock));               // rock on a bottom corner, not through the floor
+  let lid = 0;
+  if (t > 380 && t < SNAP_AT) {                            // the lid strains and drops back
+    const k = (t - 380) / (SNAP_AT - 380);
+    lid = (0.022 + 0.05 * k) * Math.pow(Math.max(0, Math.sin(2 * Math.PI * (t - 380) / 165)), 0.7);
+  } else if (t >= SNAP_AT && t < SNAP_AT + SNAP_LEN) {     // snap past fully open
+    lid = 1.075 * easeOutCubic((t - SNAP_AT) / SNAP_LEN);
+  } else if (t >= SNAP_AT + SNAP_LEN) {                    // spring back to rest
+    const u = t - SNAP_AT - SNAP_LEN;
+    lid = 1 + 0.075 * Math.exp(-u / 120) * Math.cos(2 * Math.PI * 4.2 * u / 1000);
+  }
+  lift += 0.022 * bump(t, SNAP_AT - 20, SNAP_AT + 240);    // little hop as it bursts open
+  return { lid, rock, lift };
+}
+let seqStart = -1;
+function setChestPose(rock, lift, pitch = 0, squash = 1) {
+  const m = models.rebuilt;
+  if (!m) return;
+  m.rotation.z = rock;
+  m.rotation.x = pitch;
+  m.position.y = lift;
+  const w = 1 / Math.sqrt(squash);
+  m.scale.set(w, squash, w);
+}
+function toggleLid() {
+  if (current !== "rebuilt") { toast("Meshy's chest is one fused mesh, so its lid can't open."); return; }
+  if (seqStart >= 0) return;
+  if (vacStart >= 0 || closeSeqStart >= 0) return;
+  if (target > 0.5) {
+    if (vacuumMode && loot.length && !reduceMotion) startVacuum(); else animateTo(0);
+    return;
+  }
+  if (reduceMotion) { animateTo(1); return; }
+  animDur = 0;
+  target = 1;
+  seqStart = performance.now();
+  $("toggle").textContent = "Close lid";
+}
+
+// ---------- closing: leave the loot where it landed, or vacuum everything back in first
+let vacuumMode = true;
+let vacStart = -1;
+const VAC_LEN = 1150;   // siphon length (after the wind-up)
+const VAC_ANT = 950;    // wind-up: loot lifts, hovers and trembles, dips toward the floor, then gets siphoned
+let vacLastEnd = 0;
+function startVacuum() {
+  vacStart = performance.now();
+  vacLastEnd = 0; sealedAt = -1; landedAt = -1;
+  pending = [];
+  $("toggle").textContent = "Open lid";
+  for (const it of loot) {
+    if (it.recall) continue;
+    const r0 = Math.hypot(it.p.x, it.p.z);
+    it.mode = null; it.settle = null;
+    const light = 1 - it.heavy;
+    it.vac = { from: it.p.clone(), ang0: Math.atan2(it.p.z, it.p.x), r0, y0: it.p.y,
+      // wind-up: light pieces float higher and tremble more; heavy ones barely leave the floor
+      lift: rand(0.05, 0.11) * (0.45 + 0.55 * light), dl: rand(0, 130), ph: rand(0, 100), jig: 0.6 + 0.6 * light,
+      t0: vacStart + VAC_ANT + rand(0, 140) + (1.4 - Math.min(r0, 1.4)) * 80,
+      d: 0.38 + Math.min(r0, 1.6) * 0.22, q0: it.mesh.quaternion.clone(), s: it.mesh.scale.x, spin: rand(8, 22), ax: new THREE.Vector3(rand(-1, 1), rand(-1, 1), rand(-1, 1)).normalize() };
+    vacLastEnd = Math.max(vacLastEnd, it.vac.t0 + it.vac.d * 1000);
+  }
+}
+const _wq = new THREE.Quaternion();
+// Wind-up height (fraction of the piece's lift) and tremble envelope over time a (s) since its start
+function vacWindup(a) {
+  const A = VAC_ANT / 1000;
+  const up = 1 - Math.pow(1 - THREE.MathUtils.clamp(a / 0.34, 0, 1), 3);             // ease-out rise
+  const down = THREE.MathUtils.smoothstep(a, A - 0.3, A - 0.05);                      // crouch toward the floor
+  const h = up * (1 - 0.82 * down);
+  const shake = THREE.MathUtils.smoothstep(a, 0.12, 0.5) * (1 - 0.4 * down);
+  return { h, shake };
+}
+function updateVacuum(now) {
+  if (vacStart < 0) return;
+  const tt = now - vacStart;
+  const t = Math.max(0, tt - VAC_ANT) / VAC_LEN;
+  // the aura holds its breath during the wind-up, then gets pulled in hard
+  FX_U.uSuck.value = tt < VAC_ANT ? 0.1 * THREE.MathUtils.smoothstep(tt, 0, VAC_ANT) : Math.min(1, 0.1 + 0.9 * Math.pow(t, 1.5));
+  // the chest trembles along with the loot, then goes still right before the pull
+  const trem = THREE.MathUtils.smoothstep(tt, 150, 600) * (1 - THREE.MathUtils.smoothstep(tt, VAC_ANT - 220, VAC_ANT));
+  INFLOW_U.uOn.value = sealedAt >= 0 ? 0 : (tt < VAC_ANT ? 0.25 * THREE.MathUtils.smoothstep(tt, 200, VAC_ANT) : 0.25 + 0.75 * THREE.MathUtils.smoothstep(tt, VAC_ANT, VAC_ANT + 250));
+  inflow.visible = INFLOW_U.uOn.value > 0.001;
+  if (tt <= VAC_ANT + 40) setChestPose(trem * 0.006 * Math.sin(tt * 0.06), trem * 0.0018 * Math.abs(Math.sin(tt * 0.045)));
+  if (closeSeqStart < 0 && now >= vacLastEnd - CLOSE_HIT) closeSeqStart = vacLastEnd - CLOSE_HIT;
+  let left = 0;
+  for (let i = loot.length - 1; i >= 0; i--) {
+    const it = loot[i], V = it.vac;
+    if (!V) continue;
+    if (now < V.t0) {
+      // wind-up: lift off the floor, hover and tremble, dip back down
+      left++;
+      const a = Math.max(0, tt - V.dl) / 1000;
+      const w = vacWindup(Math.min(a, VAC_ANT / 1000));
+      const j = 0.0045 * V.jig * w.shake;
+      const ph = V.ph + a * 1000;
+      it.mesh.position.set(
+        V.from.x + Math.sin(ph * 0.071) * j + Math.sin(ph * 0.113) * j * 0.5,
+        V.y0 + V.lift * w.h + Math.sin(ph * 0.019) * 0.006 * w.shake,
+        V.from.z + Math.cos(ph * 0.083) * j + Math.sin(ph * 0.127) * j * 0.5);
+      _wq.setFromAxisAngle(V.ax, Math.sin(ph * 0.05) * 0.22 * w.shake * V.jig);
+      it.mesh.quaternion.copy(V.q0).premultiply(_wq);
+      V.ys = it.mesh.position.y;
+      continue;
+    }
+    const u = Math.max(0, Math.min(1, (now - V.t0) / 1000 / V.d));
+    if (u < 1) left++;
+    const e = Math.pow(u, 2.1);                          // released: quick, violent pull
+    const r = V.r0 * (1 - e);
+    const ang = V.ang0 + e * (2.4 + V.r0);              // spiral in
+    const dive = THREE.MathUtils.smoothstep(u, 0.75, 1);
+    const y0 = V.ys ?? V.y0;
+    it.mesh.position.set(Math.cos(ang) * r, THREE.MathUtils.lerp(y0, 0.62, e) + Math.sin(u * Math.PI) * 0.18 * (1 - e) - dive * 0.22, Math.sin(ang) * r);
+    _dq.setFromAxisAngle(V.ax, V.spin * e * 6.0);
+    it.mesh.quaternion.copy(V.q0).premultiply(_dq);
+    it.mesh.scale.setScalar(V.s * (1 - 0.95 * THREE.MathUtils.smoothstep(u, 0.6, 1)) * (1 + 0.25 * Math.sin(u * Math.PI)));
+    if (u >= 1) { fx.remove(it.mesh); it.mesh.material.dispose(); loot.splice(i, 1); }
+  }
+  if (left === 0) vacStart = -1; // the close sequence (already running) slams the lid as the last pieces go in
+}
+
+// ---------- vacuum close: the power gets sealed in. The lid lifts a hair (wind-up), then
+// slams shut as the last pieces go in, killing the inflow and the aura in one frame. The chest,
+// already hopping and tilting off one corner, is driven down by the slam, lands corner-first
+// with a squash, rocks to rest, and the lid rattles on its seat (overlapping action).
+const CLOSE_HIT = 250;   // ms from the start of the slam to the lid sealing (= last piece in)
+const CLOSE_LAND = 330;  // chest hits the floor
+const CLOSE_END = 1050;
+let closeSeqStart = -1, sealedAt = -1, landedAt = -1;
+function closeTimeline(T) {
+  const k = (a, b) => THREE.MathUtils.clamp((T - a) / (b - a), 0, 1);
+  const H = CLOSE_HIT, L = CLOSE_LAND;
+  // lid: tiny lift, then a hard accelerating slam; snaps back off its seat, rattles again on landing
+  let lid;
+  if (T < 70) lid = 1 + 0.035 * Math.sin(Math.PI / 2 * k(0, 70));
+  else if (T < H) lid = 1.035 * (1 - Math.pow(k(70, H), 3.2));
+  else {
+    const u = T - H;
+    lid = 0.02 * Math.exp(-u / 40) * Math.abs(Math.sin(Math.PI * u / 50));
+    if (T > L) { const v = T - L; lid += 0.03 * Math.exp(-v / 90) * Math.abs(Math.sin(Math.PI * v / 85)); }
+  }
+  // body: hop up tilting off one corner while the treasure pours in, slammed down, organic settle
+  let hop = 0, roll = 0, pitch = 0, squash = 1;
+  if (T > 30 && T <= H) {
+    const r = 1 - Math.pow(1 - k(30, H), 2);
+    hop = 0.026 * r; roll = 0.024 * r; pitch = -0.010 * r;              // left side and back lift first
+  } else if (T > H && T <= L) {
+    const f = k(H, L);
+    hop = 0.026 * (1 - f * f);                                         // driven down, faster than gravity
+    roll = 0.024 * (1 - f) ; pitch = -0.010 + 0.026 * f;               // the slam throws the weight forward
+  } else if (T > L) {
+    const u = T - L;
+    hop = 0.0045 * Math.exp(-u / 55) * Math.abs(Math.sin(Math.PI * u / 75));
+    roll = -0.011 * Math.exp(-u / 110) * Math.sin(2 * Math.PI * u / 170);    // rocks across its corners
+    pitch = 0.016 * Math.exp(-u / 80) * Math.cos(2 * Math.PI * u / 140);
+    squash = 1 - 0.04 * Math.exp(-u / 45) * Math.cos(2 * Math.PI * u / 130); // squash, stretch, settle
+  }
+  // tilting about the base: keep the lifted corners above the floor
+  const lift = hop + 0.53 * Math.abs(Math.sin(roll)) + 0.30 * Math.abs(Math.sin(pitch));
+  return { lid, lift, roll, pitch, squash };
+}
+function updateCloseSeq(now) {
+  if (closeSeqStart < 0 || now < closeSeqStart) return;
+  const T = now - closeSeqStart;
+  const c = closeTimeline(Math.min(T, CLOSE_END));
+  target = 0; animDur = 0;
+  setOpen(c.lid);
+  setChestPose(c.roll, c.lift, c.pitch, c.squash);
+  if (T >= CLOSE_HIT && sealedAt < 0) {
+    // sealed: the inflow, the aura and the light are cut off in the same frame
+    sealedAt = now;
+    INFLOW_U.uOn.value = 0; inflow.visible = false;
+    FX_U.uSuck.value = 0; fxI = 0;
+  }
+  if (T >= CLOSE_LAND && landedAt < 0) landedAt = now;
+  if (sealedAt >= 0) {
+    const a = now - sealedAt;
+    // the last of the light escaping the seam as it shuts: blinding for a blink, then gone
+    if (glow) glow.intensity = 20 * Math.exp(-a / 45);
+    bloom.strength += 0.55 * Math.exp(-a / 70);
+    renderer.toneMappingExposure += 0.15 * Math.exp(-a / 60);
+  }
+  if (landedAt >= 0) {
+    const a = (now - landedAt) / 1000;
+    const sa = Math.max(0, 1 - a / 0.45);
+    slamRing.visible = sa > 0;
+    slamRing.scale.set(0.55 + a * 2.4, 0.55 + a * 2.4 * 0.8, 1);
+    slamRing.material.uniforms.uA.value = sa * sa * sa * 0.38;
+    camShake = Math.max(camShake, 0.016 * Math.exp(-a / 0.11));
+  }
+  if (T >= CLOSE_END) {
+    closeSeqStart = -1; sealedAt = -1; landedAt = -1; slamRing.visible = false;
+    setOpen(0); setChestPose(0, 0);
+  }
+}
+$("vacuum").addEventListener("click", (e) => {
+  vacuumMode = !vacuumMode;
+  e.currentTarget.setAttribute("aria-pressed", vacuumMode);
+  e.currentTarget.textContent = vacuumMode ? "On close: vacuum loot back" : "On close: leave loot out";
+});
+
+// ---------- light controls
+$("lightbtn").addEventListener("click", (e) => {
+  const show = $("lightpanel").hidden;
+  $("lightpanel").hidden = !show;
+  e.currentTarget.setAttribute("aria-pressed", show);
+  e.currentTarget.setAttribute("aria-expanded", show);
+  resize(false);
+});
+$("l-int").addEventListener("input", (e) => { SPOT.intensity = e.target.value / 100; $("l-int-out").textContent = `${e.target.value}%`; });
+$("l-rad").addEventListener("input", (e) => { SPOT.radius = e.target.value / 100; $("l-rad-out").textContent = `${SPOT.radius.toFixed(2)} m`; });
+function setLightColor(hex) {
+  SPOT.color.set(hex);
+  $("l-col").value = hex;
+  document.querySelectorAll(".sw").forEach((b) => b.setAttribute("aria-pressed", b.dataset.c === hex));
+}
+document.querySelectorAll(".sw").forEach((b) => b.addEventListener("click", () => setLightColor(b.dataset.c)));
+$("l-col").addEventListener("input", (e) => setLightColor(e.target.value));
+
+// ---------- UI
+let toastTimer;
+function toast(msg) {
+  const t = $("toast"); t.textContent = msg; t.classList.add("show");
+  clearTimeout(toastTimer); toastTimer = setTimeout(() => t.classList.remove("show"), 2400);
+}
+$("toggle").addEventListener("click", toggleLid);
+$("lid").addEventListener("input", (e) => { animDur = 0; seqStart = -1; setChestPose(0, 0); target = e.target.value / MAX_OPEN; setOpen(target); });
+$("m-rebuilt").addEventListener("click", () => setModel("rebuilt"));
+$("m-meshy").addEventListener("click", () => setModel("meshy"));
+$("paint").addEventListener("click", (e) => {
+  BAKE_U.uBake.value = BAKE_U.uBake.value > 0.5 ? 0 : 1;
+  e.currentTarget.setAttribute("aria-pressed", BAKE_U.uBake.value > 0.5);
+  setModel(current);
+});
+$("spin").addEventListener("click", (e) => {
+  controls.autoRotate = !controls.autoRotate;
+  e.currentTarget.setAttribute("aria-pressed", controls.autoRotate);
+});
+$("spin").setAttribute("aria-pressed", controls.autoRotate);
+let wire = false;
+function applyWire() {
+  for (const m of Object.values(MATS)) m.wireframe = wire;
+  if (models.meshy) models.meshy.traverse((o) => { if (o.isMesh) o.material.wireframe = wire; });
+}
+$("wire").addEventListener("click", (e) => { wire = !wire; e.currentTarget.setAttribute("aria-pressed", wire); applyWire(); });
+
+// tap the chest to open/close (ignores drags)
+const ray = new THREE.Raycaster();
+let down = null;
+renderer.domElement.addEventListener("pointerdown", (e) => { down = { x: e.clientX, y: e.clientY, t: performance.now() }; });
+renderer.domElement.addEventListener("pointerup", (e) => {
+  if (!down) return;
+  const moved = Math.hypot(e.clientX - down.x, e.clientY - down.y);
+  const quick = performance.now() - down.t < 350;
+  down = null;
+  if (moved > 8 || !quick) return;
+  const r = renderer.domElement.getBoundingClientRect();
+  ray.setFromCamera(new THREE.Vector2(((e.clientX - r.left) / r.width) * 2 - 1, -((e.clientY - r.top) / r.height) * 2 + 1), camera);
+  const m = models[current];
+  if (m && ray.intersectObject(m, true).length) toggleLid();
+});
+controls.addEventListener("start", () => {
+  if (controls.autoRotate) { controls.autoRotate = false; $("spin").setAttribute("aria-pressed", false); }
+});
+
+// ---------- treasure FX: loot burst, magic swirl, interior aura
+const CH = { inX: 0.488, inZ: 0.26, outX: 0.556, outZ: 0.33, rimTop: 0.51, seam: 0.465, lidZ: -0.31 };
+const mound = (x, z) => 0.31 + 0.17 * Math.exp(-((x / 0.34) ** 2 + (z / 0.19) ** 2));
+const rand = (a, b) => a + Math.random() * (b - a);
+const fx = new THREE.Group();
+scene.add(fx);
+
+// coins: lathe profile gives a raised rim around a recessed face
+const coinGeo = new THREE.LatheGeometry(
+  [[0, -0.045], [0.8, -0.045], [0.86, -0.07], [1, -0.07], [1, 0.07], [0.86, 0.07], [0.8, 0.045], [0, 0.045]].map(([x, y]) => new THREE.Vector2(x, y)), 28);
+const gemGeos = [
+  // round brilliant: pavilion, girdle, crown, table
+  new THREE.LatheGeometry([[0, -0.56], [0.5, 0], [0.5, 0.06], [0.4, 0.17], [0.26, 0.26], [0, 0.26]].map(([x, y]) => new THREE.Vector2(x, y)), 10),
+  new THREE.OctahedronGeometry(0.5, 0),
+  new THREE.IcosahedronGeometry(0.46, 0),
+  new THREE.CylinderGeometry(0.34, 0.48, 0.42, 8), // step cut
+  new THREE.DodecahedronGeometry(0.43, 0),
+  // marquise-ish: stretched octahedron
+  new THREE.OctahedronGeometry(0.5, 0).scale(1.5, 0.75, 0.7),
+];
+const GEM_COLORS = ["#e0103f", "#1f48e8", "#0fb862", "#8a2be2", "#f29a0c", "#dfefff", "#1fc8c2", "#ff4fa8"];
+// every piece gets its own glow amount, so the pile twinkles unevenly
+function coinMaterial() {
+  return new THREE.MeshStandardMaterial({
+    color: "#ffcf4a", metalness: 1, roughness: rand(0.22, 0.42), emissive: "#8a5d12",
+    emissiveIntensity: Math.random() < 0.15 ? rand(0.8, 1.4) : rand(0.08, 0.5), envMapIntensity: 0.9,
+  });
+}
+function gemMaterial(large = false) {
+  const c = GEM_COLORS[(Math.random() * GEM_COLORS.length) | 0];
+  const col = new THREE.Color(c);
+  return new THREE.MeshPhysicalMaterial({
+    color: col, metalness: 0.0, roughness: 0.0, flatShading: true,
+    ior: c === "#dfefff" ? 2.42 : rand(1.75, 2.1), specularIntensity: 1, specularColor: new THREE.Color("#ffffff"),
+    clearcoat: 1, clearcoatRoughness: 0.0, iridescence: c === "#dfefff" ? 1 : rand(0.1, 0.5), iridescenceIOR: 1.6,
+    emissive: col, emissiveIntensity: Math.random() < 0.2 ? rand(0.7, 1.3) : rand(0.04, 0.4), envMapIntensity: 2.6,
+    // the big stones refract what's behind them
+    ...(large ? { transmission: 0.85, thickness: 0.12, attenuationColor: col, attenuationDistance: 0.12, emissiveIntensity: rand(0.05, 0.25) } : {}),
+  });
+}
+
+const loot = [];
+let pending = [];
+let burstFired = false;
+let burstAt = -1;
+const LOOT_COUNT = reduceMotion ? 70 : 180;
+
+function fireBurst(now) {
+  burstFired = true;
+  // when loot is left out between openings, keep the floor from filling up forever
+  const extra = loot.length + LOOT_COUNT - 420;
+  for (let i = 0; i < extra && i < loot.length; i++) {
+    const it = loot[i];
+    if (!it.recall && !it.vac) it.recall = { from: it.p.clone(), to: it.p.clone().setY(-0.05), t0: now, d: 0.6, s: it.mesh.scale.x };
+  }
+  burstAt = now;
+  for (let i = 0; i < LOOT_COUNT; i++) {
+    // a big first gush, then a fountain that keeps welling over the rim
+    const at = now + (Math.random() < 0.55 ? rand(0, 260) : rand(200, 1100)) * (reduceMotion ? 0.1 : 1);
+    pending.push({ at, kind: Math.random() < 0.6 ? "coin" : "gem" });
+  }
+  pending.sort((a, b) => a.at - b.at);
+}
+
+function spawn(kind) {
+  let mesh, rc, s, mass;
+  if (kind === "coin") {
+    const r = Math.random();
+    s = r < 0.1 ? rand(0.045, 0.06) : r < 0.45 ? rand(0.032, 0.044) : rand(0.02, 0.031);
+    mesh = new THREE.Mesh(coinGeo, coinMaterial());
+    rc = 0.07 * s;
+    mass = (s / 0.03) ** 3;
+  } else {
+    const r = Math.random();
+    s = r < 0.05 ? rand(0.12, 0.17) : r < 0.2 ? rand(0.065, 0.1) : rand(0.026, 0.06); // the occasional huge stone
+    mesh = new THREE.Mesh(gemGeos[(Math.random() * gemGeos.length) | 0], gemMaterial(s > 0.11));
+    rc = 0.3 * s;
+    mass = (s / 0.04) ** 3;
+  }
+  mesh.scale.setScalar(s);
+  mesh.castShadow = s > 0.03;
+  mesh.quaternion.setFromEuler(new THREE.Euler(rand(0, 6.28), rand(0, 6.28), rand(0, 6.28)));
+  const x = rand(-0.34, 0.34), z = rand(-0.17, 0.17);
+  const p = new THREE.Vector3(x, mound(x, z) + 0.03, z);
+  // heavy pieces leave slower and tumble less; most loot flies forward/sideways (the lid blocks the back)
+  const heavy = Math.min(1, Math.log2(1 + mass) / 3);
+  const spill = Math.random() < 0.7;
+  const ang = rand(-0.25 * Math.PI, 1.25 * Math.PI);
+  const hs = (spill ? rand(0.55, 1.45) : rand(0.05, 0.35)) * (1 - 0.3 * heavy);
+  const v = new THREE.Vector3(Math.cos(ang) * hs + x * 0.8, rand(2.0, 3.5) * (1 - 0.18 * heavy), Math.sin(ang) * hs + z * 0.6);
+  const w = new THREE.Vector3(rand(-1, 1), rand(-1, 1), rand(-1, 1)).normalize().multiplyScalar(rand(6, 20) * (1 - 0.6 * heavy));
+  mesh.position.copy(p);
+  fx.add(mesh);
+  loot.push({ mesh, p, v, w, rc, s, kind, mass, heavy, bounce: 0.45 - 0.3 * heavy, rest: false, settle: null, recall: null, mode: null, hits: 0 });
+}
+
+const _dq = new THREE.Quaternion(), _ax = new THREE.Vector3(), _up = new THREE.Vector3(0, 1, 0);
+const _q1 = new THREE.Quaternion(), _q2 = new THREE.Quaternion(), _q3 = new THREE.Quaternion(), _n = new THREE.Vector3(), _d = new THREE.Vector3();
+function settle(it, ground) {
+  it.rest = true;
+  it.mode = null;
+  it.v.set(0, 0, 0);
+  const to = new THREE.Quaternion();
+  if (it.kind === "coin") {
+    const n = ground ? _up.clone() : new THREE.Vector3(-(mound(it.p.x + 0.01, it.p.z) - mound(it.p.x - 0.01, it.p.z)) / 0.02, 1, -(mound(it.p.x, it.p.z + 0.01) - mound(it.p.x, it.p.z - 0.01)) / 0.02).normalize();
+    to.setFromUnitVectors(_up, n).multiply(new THREE.Quaternion().setFromAxisAngle(_up, rand(0, 6.28)));
+    if (ground && it.p.y < 0.1) it.p.y = it.rc;
+  } else {
+    to.copy(it.mesh.quaternion);
+  }
+  it.settle = { from: it.mesh.quaternion.clone(), to, t: 0, rate: 4 + 4 * it.heavy };
+}
+
+// Ground behaviours once a piece stops bouncing: coins roll away on their edge, spin
+// like a dropped coin and ring down flat, or just thud into place (heavier = more likely);
+// gems tumble a little or stop dead.
+function startGroundMode(it) {
+  const hv = Math.hypot(it.v.x, it.v.z);
+  const dir = hv > 1e-3 ? new THREE.Vector3(it.v.x / hv, 0, it.v.z / hv) : new THREE.Vector3(Math.cos(rand(0, 6.28)), 0, Math.sin(rand(0, 6.28)));
+  const light = 1 - it.heavy;
+  const r = Math.random();
+  if (it.kind === "coin") {
+    if (r < 0.22 + 0.25 * light) {
+      it.mode = { type: "roll", t: 0, T: rand(0.8, 2.2) * (0.6 + 0.6 * light), v0: Math.max(hv, rand(0.25, 0.6)) * (0.6 + 0.5 * light), dir, phi: 0, curve: rand(-1.4, 1.4) };
+    } else if (r < 0.45 + 0.25 * light) {
+      it.mode = { type: "spin", t: 0, T: rand(1.0, 2.6) * (0.6 + 0.6 * light), w0: rand(14, 30) * (0.5 + 0.6 * light), psi: rand(0, 6.28), th0: 0 };
+    } else {
+      settle(it, true);
+      return;
+    }
+  } else if (r < 0.5 * light + 0.15) {
+    it.mode = { type: "tumble", t: 0, T: rand(0.3, 0.9) * (0.5 + light), v0: Math.max(hv, rand(0.15, 0.4)) * (0.5 + 0.6 * light), dir, phi: 0 };
+  } else {
+    settle(it, true);
+    return;
+  }
+  it.v.set(0, 0, 0);
+}
+
+function stepGroundMode(it, dt) {
+  const m = it.mode;
+  m.t += dt;
+  const u = Math.min(1, m.t / m.T);
+  if (m.type === "roll") {
+    const speed = m.v0 * (1 - u);
+    m.dir.applyAxisAngle(_up, m.curve * u * dt * 2.0);
+    it.p.addScaledVector(m.dir, speed * dt);
+    m.phi += (speed / it.s) * dt;
+    const lean = 0.35 * u * u;
+    _n.crossVectors(m.dir, _up).normalize();                    // disk normal is horizontal while rolling
+    _q1.setFromUnitVectors(_up, _n);
+    _q2.setFromAxisAngle(_n, m.phi);
+    _q3.setFromAxisAngle(m.dir, lean * Math.sign(m.curve || 1));
+    it.mesh.quaternion.copy(_q3).multiply(_q2).multiply(_q1);
+    it.p.y = it.s * Math.cos(lean) + it.rc * Math.sin(lean);
+    if (u >= 1) { // run out of speed: ring down like a spinning coin
+      it.mode = { type: "spin", t: 0, T: rand(0.5, 0.9), w0: rand(5, 9), psi: Math.atan2(_n.z, _n.x), th0: lean };
+    }
+  } else if (m.type === "spin") {
+    const th = m.th0 + (Math.PI / 2 - m.th0) * Math.pow(u, 2.2);   // tilt from edge-up to flat
+    const rate = Math.min(45, m.w0 * (0.35 + 0.65 * (1 - u)) + 5 * u * u * u / (Math.cos(th) + 0.12)); // whirr as it lands
+    m.psi += rate * dt;
+    _n.set(Math.cos(th) * Math.cos(m.psi), Math.sin(th), Math.cos(th) * Math.sin(m.psi));
+    it.mesh.quaternion.setFromUnitVectors(_up, _n);
+    it.p.y = it.s * Math.cos(th) + it.rc * Math.sin(th);
+    if (u >= 1) { it.mode = null; it.rest = true; it.p.y = it.rc; }
+  } else if (m.type === "tumble") {
+    const speed = m.v0 * (1 - u) * (1 - u);
+    it.p.addScaledVector(m.dir, speed * dt);
+    _ax.crossVectors(_up, m.dir).normalize();
+    _dq.setFromAxisAngle(_ax, (speed / it.rc) * dt * 0.6);
+    it.mesh.quaternion.premultiply(_dq);
+    if (u >= 1) { it.mode = null; it.rest = true; }
+  }
+  // don't roll into the chest
+  const ax = Math.abs(it.p.x), az = Math.abs(it.p.z);
+  if (ax < CH.outX + it.rc && az < CH.outZ + it.rc && m.dir) {
+    if (CH.outX - ax < CH.outZ - az) { it.p.x = Math.sign(it.p.x) * (CH.outX + it.rc); m.dir.x *= -1; }
+    else { it.p.z = Math.sign(it.p.z) * (CH.outZ + it.rc); m.dir.z *= -1; }
+  }
+  it.mesh.position.copy(it.p);
+}
+
+function contact(it, y, bounce, fric, ground) {
+  it.p.y = y;
+  if (it.v.y < 0) it.v.y = -it.v.y * bounce;
+  it.v.x *= fric; it.v.z *= fric;
+  it.w.multiplyScalar(0.55 - 0.2 * it.heavy);
+  it.hits++;
+  const sp = it.v.x * it.v.x + it.v.y * it.v.y + it.v.z * it.v.z;
+  if ((it.v.y < 0.45 && sp < 0.4) || it.hits > 5) {
+    if (ground) startGroundMode(it); else settle(it, false);
+  }
+}
+
+function stepLoot(it, dt) {
+  const px = it.p.x, pz = it.p.z, py = it.p.y;
+  it.v.y -= 9.8 * dt;
+  it.p.addScaledVector(it.v, dt);
+  // the open lid stands behind the chest: treat it as a wall
+  if (it.p.z < CH.lidZ && it.p.y > CH.seam) { it.p.z = CH.lidZ; if (it.v.z < 0) it.v.z = -it.v.z * 0.35; }
+  const r = it.rc;
+  if (open < 0.15 && Math.abs(it.p.x) < CH.outX && Math.abs(it.p.z) < 0.3 && py > CH.rimTop - 0.01) { // lid is shut: land on top of it
+    const top = 0.5 + Math.sqrt(Math.max(0, 0.09 - it.p.z * it.p.z)) + 0.02 + r;
+    if (it.p.y < top) { it.p.y = top; settle(it, true); it.p.y = top; it.mesh.position.copy(it.p); return; }
+  }
+  const wasIn = Math.abs(px) < CH.inX && Math.abs(pz) < CH.inZ;
+  if (wasIn && it.p.y < CH.rimTop) { // inner walls keep low loot inside
+    if (Math.abs(it.p.x) > CH.inX - r) { it.p.x = Math.sign(it.p.x) * (CH.inX - r); it.v.x *= -0.4; }
+    if (Math.abs(it.p.z) > CH.inZ - r) { it.p.z = Math.sign(it.p.z) * (CH.inZ - r); it.v.z *= -0.4; }
+  }
+  const ax = Math.abs(it.p.x), az = Math.abs(it.p.z);
+  if (ax < CH.inX && az < CH.inZ) {
+    const fy = mound(it.p.x, it.p.z) + r;
+    if (it.p.y < fy) contact(it, fy, it.bounce * 0.6, 0.5, false);
+  } else if (ax < CH.outX + r && az < CH.outZ + r && it.p.y < CH.rimTop + r) {
+    if (py >= CH.rimTop + r - 1e-3) { // clipped the rim: bounce up and tumble outward
+      it.p.y = CH.rimTop + r;
+      it.v.y = Math.abs(it.v.y) * it.bounce + 0.3;
+      const ox = (CH.outX - ax) < (CH.outZ - az);
+      if (ox) it.v.x = Math.sign(it.p.x) * Math.max(Math.abs(it.v.x), 0.5); else it.v.z = Math.sign(it.p.z || 1) * Math.max(Math.abs(it.v.z), 0.5);
+    } else { // hit the outside of the chest
+      const dx = CH.outX + r - ax, dz = CH.outZ + r - az;
+      if (dx < dz) { it.p.x = Math.sign(it.p.x) * (CH.outX + r); it.v.x = Math.sign(it.p.x) * Math.abs(it.v.x) * 0.4; }
+      else { it.p.z = Math.sign(it.p.z) * (CH.outZ + r); it.v.z = Math.sign(it.p.z) * Math.abs(it.v.z) * 0.4; }
+    }
+  }
+  if (it.p.y < r && !it.rest && !it.mode) contact(it, r, it.bounce, 0.75 - 0.15 * it.heavy, true);
+  if (!it.rest && !it.mode) {
+    const wl = it.w.length();
+    if (wl > 1e-4) { _ax.copy(it.w).divideScalar(wl); _dq.setFromAxisAngle(_ax, wl * dt); it.mesh.quaternion.premultiply(_dq); }
+  }
+  it.mesh.position.copy(it.p);
+}
+
+function recallLoot() {
+  burstFired = false;
+  pending = [];
+  for (const it of loot) {
+    const x = rand(-0.3, 0.3), z = rand(-0.15, 0.15);
+    it.recall = { from: it.p.clone(), to: new THREE.Vector3(x, mound(x, z), z), t0: performance.now() + rand(0, 200), d: rand(0.4, 0.7), s: it.mesh.scale.x };
+  }
+}
+
+function updateLoot(now, dt) {
+  while (pending.length && pending[0].at <= now) spawn(pending.shift().kind);
+  const sub = 3, h = dt / sub;
+  for (let i = loot.length - 1; i >= 0; i--) {
+    const it = loot[i];
+    if (it.recall) {
+      const R = it.recall;
+      const t = Math.max(0, Math.min(1, (now - R.t0) / 1000 / R.d)), e = t * t * (3 - 2 * t);
+      it.mesh.position.lerpVectors(R.from, R.to, e);
+      it.mesh.position.y += Math.sin(t * Math.PI) * 0.35;
+      it.mesh.scale.setScalar(R.s * (1 - e * 0.9));
+      if (t >= 1) { fx.remove(it.mesh); it.mesh.material.dispose(); loot.splice(i, 1); }
+      continue;
+    }
+    if (it.vac) continue;
+    if (it.mode) stepGroundMode(it, dt);
+    else if (!it.rest) for (let k = 0; k < sub && !it.rest && !it.mode; k++) stepLoot(it, h);
+    if (it.settle) {
+      it.settle.t = Math.min(1, it.settle.t + dt * it.settle.rate);
+      it.mesh.quaternion.slerpQuaternions(it.settle.from, it.settle.to, it.settle.t);
+      it.mesh.position.copy(it.p);
+      if (it.settle.t >= 1) it.settle = null;
+    }
+  }
+}
+
+// ---------- particles (all motion computed on the GPU from a seed per particle)
+const FX_U = { uTime: { value: 0 }, uIntensity: { value: 0 }, uBurst: { value: 0 }, uBurstAge: { value: 99 }, uScale: { value: 600 }, uSuck: { value: 0 }, uSwirl: { value: 0 }, uFlash: { value: 0 } };
+const PAL = `
+vec3 pal(float h){ vec3 g = vec3(1.0, 0.78, 0.36), c = vec3(0.36, 0.9, 1.0), m = vec3(1.0, 0.38, 0.88);
+  return h < 0.5 ? mix(g, c, h * 2.0) : mix(c, m, (h - 0.5) * 2.0); }`;
+const SPRITE_FRAG = `
+varying float vAlpha; varying vec3 vColor; varying float vStar;
+void main(){
+  vec2 c = gl_PointCoord - 0.5; float d = length(c);
+  float core = smoothstep(0.5, 0.0, d); core *= core;
+  float star = vStar * (max(0.0, 1.0 - abs(c.x) * 16.0) * smoothstep(0.5, 0.0, abs(c.y)) + max(0.0, 1.0 - abs(c.y) * 16.0) * smoothstep(0.5, 0.0, abs(c.x)));
+  float a = (core + star) * vAlpha;
+  if (a < 0.004) discard;
+  gl_FragColor = vec4(vColor * a, a);
+}`;
+function particles(count, body) {
+  const g = new THREE.BufferGeometry();
+  const seed = new Float32Array(count * 4), dir = new Float32Array(count * 3);
+  for (let i = 0; i < count; i++) {
+    seed.set([Math.random(), Math.random(), Math.random(), Math.random()], i * 4);
+    const th = Math.random() * 6.2832, ph = Math.acos(rand(0.15, 1));
+    dir.set([Math.cos(th) * Math.sin(ph), Math.cos(ph), Math.sin(th) * Math.sin(ph)], i * 3);
+  }
+  g.setAttribute("position", new THREE.BufferAttribute(new Float32Array(count * 3), 3));
+  g.setAttribute("aSeed", new THREE.BufferAttribute(seed, 4));
+  g.setAttribute("aDir", new THREE.BufferAttribute(dir, 3));
+  const m = new THREE.ShaderMaterial({
+    uniforms: FX_U, transparent: true, depthWrite: false, blending: THREE.AdditiveBlending,
+    vertexShader: `
+      uniform float uTime, uIntensity, uBurst, uBurstAge, uScale, uSuck, uSwirl;
+      attribute vec4 aSeed; attribute vec3 aDir;
+      varying float vAlpha; varying vec3 vColor; varying float vStar;
+      ${PAL}
+      void main(){
+        vec3 p; float size; ${body}
+        if (uSuck > 0.0) { // vacuum: spiral everything down into the chest mouth
+          vec3 sink = vec3(0.0, 0.42, 0.0);
+          vec3 rel = p - sink;
+          float k = clamp(uSuck * (0.75 + aSeed.x * 0.5), 0.0, 1.0);
+          float a = k * k * (4.0 + aSeed.z * 3.0);
+          rel.xz = mat2(cos(a), -sin(a), sin(a), cos(a)) * rel.xz;
+          p = sink + rel * pow(1.0 - k, 1.6);
+          size *= 1.0 - 0.6 * k;
+          vAlpha *= (1.0 + 1.5 * k) * (1.0 - smoothstep(0.85, 1.0, k));
+        }
+        vec4 mv = modelViewMatrix * vec4(p, 1.0);
+        gl_Position = projectionMatrix * mv;
+        gl_PointSize = size * uScale / max(-mv.z, 0.1);
+        vStar = step(0.82, fract(aSeed.x * 17.0));
+      }`,
+    fragmentShader: SPRITE_FRAG,
+  });
+  const pts = new THREE.Points(g, m);
+  pts.frustumCulled = false;
+  fx.add(pts);
+  return pts;
+}
+// swirl: a rising helix of motes orbiting the chest
+particles(reduceMotion ? 300 : 900, `
+  float life = fract(uTime * 0.16 + aSeed.x);
+  float arm = floor(aSeed.y * 3.0);
+  float ang = arm * 2.0944 + life * 7.5 + uTime * 1.1 + (aSeed.z - 0.5) * 0.35;
+  float r = (0.78 - 0.32 * life) + (aSeed.w - 0.5) * 0.08;
+  r *= 0.8 + 0.2 * uIntensity + uBurst * 0.35;
+  p = vec3(cos(ang) * r, 0.04 + life * 1.45 + (aSeed.z - 0.5) * 0.06, sin(ang) * r * 0.8);
+  size = (0.009 + aSeed.w * 0.02) * (1.0 + uBurst * 0.8) * (1.0 - 0.4 * life);
+  vAlpha = smoothstep(0.0, 0.1, life) * (1.0 - smoothstep(0.75, 1.0, life)) * uIntensity * uSwirl;
+  vColor = pal(fract(arm * 0.37 + life * 0.5)) * (1.5 + uBurst * 1.2);`);
+// aura: golden motes spiralling up out of the chest before fading away
+particles(reduceMotion ? 240 : 650, `
+  float life = fract(uTime * (0.1 + aSeed.z * 0.12) + aSeed.x);
+  float ang = aSeed.y * 6.2832 + life * (5.0 + aSeed.z * 4.0) + uTime * 0.6;
+  float r = (0.08 + aSeed.w * 0.32) * (1.0 + life * 1.6);
+  p = vec3(cos(ang) * r, 0.38 + life * (1.2 + aSeed.z * 0.7), sin(ang) * r * 0.6);
+  float pulse = 0.75 + 0.25 * sin(uTime * 2.4 - life * 6.0);
+  size = (0.006 + aSeed.w * 0.015) * (1.0 - 0.5 * life);
+  vAlpha = smoothstep(0.0, 0.1, life) * (1.0 - smoothstep(0.55, 1.0, life)) * uIntensity * 1.4 * pulse;
+  vColor = mix(vec3(1.0, 0.72, 0.25), vec3(1.0, 0.93, 0.62), aSeed.w) * (1.6 + uBurst);`);
+// burst: sparks thrown out the moment the lid pops
+particles(reduceMotion ? 120 : 360, `
+  float t = uBurstAge * (0.7 + aSeed.z * 0.6);
+  p = vec3(0.0, 0.5, 0.0) + aDir * (1.0 - exp(-t * 2.6)) * (0.55 + aSeed.y * 1.1) + vec3(0.0, -0.45 * t * t, 0.0);
+  size = (0.01 + aSeed.w * 0.022) * (1.0 - 0.5 * clamp(t, 0.0, 1.0));
+  vAlpha = exp(-t * 1.5) * step(uBurstAge, 4.0);
+  vColor = pal(aSeed.x) * 1.9;`);
+
+// light column rising from the opening
+const column = new THREE.Mesh(
+  new THREE.CylinderGeometry(1.15, 0.47, 1.6, 64, 1, true),
+  new THREE.ShaderMaterial({
+    uniforms: FX_U, transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, side: THREE.DoubleSide,
+    vertexShader: `varying vec2 vUv; void main(){ vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }`,
+    fragmentShader: `
+      uniform float uTime, uIntensity, uBurst, uSuck; varying vec2 vUv;
+      void main(){
+        float h = vUv.y;
+        float rays = 0.5 + 0.5 * sin(vUv.x * 6.2832 * 13.0 + uTime * 0.9 + sin(vUv.x * 41.0 - uTime * 0.7) * 1.6);
+        rays = pow(rays, 2.0) * (0.55 + 0.45 * sin(vUv.x * 6.2832 * 5.0 - uTime * 0.5));
+        float pulse = 0.7 + 0.3 * sin(uTime * 2.4) + 0.1 * sin(uTime * 5.3);
+        float fade = pow(1.0 - h, 1.8) * smoothstep(0.0, 0.05, h);
+        vec3 col = mix(vec3(1.0, 0.74, 0.3), vec3(1.0, 0.9, 0.6), h);
+        float a = fade * (0.25 + 0.75 * rays) * uIntensity * pulse * (0.5 + uBurst * 0.4) * (1.0 + uSuck * 1.2);
+        gl_FragColor = vec4(col * a, a);
+      }`,
+  }));
+column.scale.set(1, 1, 0.6);
+column.position.set(0, 0.44 + 0.8, 0.02);
+column.renderOrder = 2;
+fx.add(column);
+
+// glow pooled over the treasure
+const pool = new THREE.Mesh(
+  new THREE.PlaneGeometry(0.96, 0.5),
+  new THREE.ShaderMaterial({
+    uniforms: FX_U, transparent: true, depthWrite: false, blending: THREE.AdditiveBlending,
+    vertexShader: `varying vec2 vUv; void main(){ vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }`,
+    fragmentShader: `
+      uniform float uTime, uIntensity, uBurst; varying vec2 vUv;
+      void main(){
+        vec2 q = (vUv - 0.5) * vec2(1.0, 1.9);
+        float d = length(q);
+        float shimmer = 0.75 + 0.25 * sin(uTime * 3.0 + q.x * 14.0) * sin(uTime * 2.3 + q.y * 11.0);
+        float a = smoothstep(0.62, 0.0, d) * shimmer * uIntensity * (0.45 + uBurst * 0.4);
+        vec3 col = mix(vec3(1.0, 0.8, 0.4), vec3(0.9, 0.5, 1.0), 0.5 + 0.5 * sin(uTime * 0.9));
+        gl_FragColor = vec4(col * a, a);
+      }`,
+  }));
+pool.rotation.x = -Math.PI / 2;
+pool.position.set(0, 0.47, 0);
+fx.add(pool);
+
+// the instant the lid is thrown open: a white-gold flash, a shockwave ring and a bloom spike
+const flashTex = (() => {
+  const c = document.createElement("canvas"); c.width = c.height = 128;
+  const g = c.getContext("2d"), gr = g.createRadialGradient(64, 64, 0, 64, 64, 64);
+  gr.addColorStop(0, "rgba(255,255,255,1)"); gr.addColorStop(0.18, "rgba(255,236,170,0.9)"); gr.addColorStop(0.5, "rgba(255,170,60,0.25)"); gr.addColorStop(1, "rgba(255,140,40,0)");
+  g.fillStyle = gr; g.fillRect(0, 0, 128, 128);
+  const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace; return t;
+})();
+const flash = new THREE.Sprite(new THREE.SpriteMaterial({ map: flashTex, color: new THREE.Color(3, 2.6, 2), blending: THREE.AdditiveBlending, depthWrite: false, transparent: true, opacity: 0 }));
+flash.position.set(0, 0.6, 0.05);
+flash.renderOrder = 5;
+fx.add(flash);
+const shock = new THREE.Mesh(new THREE.RingGeometry(0.85, 1.0, 96), new THREE.ShaderMaterial({
+  uniforms: { uA: { value: 0 } }, transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, side: THREE.DoubleSide,
+  vertexShader: `varying vec2 vUv; void main(){ vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }`,
+  fragmentShader: `uniform float uA; varying vec2 vUv; void main(){ gl_FragColor = vec4(vec3(1.6, 1.25, 0.7) * uA, uA); }`,
+}));
+shock.rotation.x = -Math.PI / 2;
+shock.position.set(0, 0.5, 0);
+fx.add(shock);
+// a low ring that rolls out across the floor when the sealed chest lands
+const slamRing = new THREE.Mesh(shock.geometry, shock.material.clone());
+slamRing.rotation.x = -Math.PI / 2; slamRing.position.set(0, 0.015, 0); slamRing.visible = false;
+fx.add(slamRing);
+
+const magicLight = new THREE.PointLight("#c58bff", 0, 2.6, 2);
+magicLight.position.set(0, 1.25, 0.25);
+fx.add(magicLight);
+
+let fxI = 0, lastNow = performance.now();
+const _hsl = new THREE.Color();
+function updateFX(now) {
+  const dt = Math.min(0.066, (now - lastNow) / 1000);
+  lastNow = now;
+  const on = current === "rebuilt";
+  fx.visible = on;
+  const targetI = on ? THREE.MathUtils.smoothstep(open, 0.2, 0.75) : 0;
+  fxI += (targetI - fxI) * Math.min(1, dt * 3);
+  // while the lid strains, light leaks out of the gap
+  const leak = on && seqStart >= 0 && open < 0.3 ? Math.min(1, open * 20) : 0;
+  fxI = Math.max(fxI, leak * 0.3);
+  const age = burstAt < 0 ? 99 : (now - burstAt) / 1000;
+  FX_U.uTime.value = now / 1000;
+  FX_U.uIntensity.value = fxI;
+  FX_U.uBurstAge.value = age;
+  FX_U.uBurst.value = burstAt < 0 ? 0 : Math.exp(-age * 2.2);
+  // vortex: spins up with the burst and dissipates after a few seconds
+  FX_U.uSwirl.value = burstAt < 0 ? 0 : THREE.MathUtils.smoothstep(age, 0.0, 0.25) * (1 - THREE.MathUtils.smoothstep(age, 2.4, 4.6));
+  // flash: very brief and very bright
+  const fl = burstAt < 0 || age > 1 ? 0 : Math.exp(-age * 11) * THREE.MathUtils.smoothstep(age, 0, 0.03);
+  FX_U.uFlash.value = fl;
+  flash.material.opacity = Math.min(0.85, fl);
+  flash.scale.setScalar(0.7 + 1.5 * Math.sqrt(Math.min(age, 1)));
+  flash.visible = fl > 0.003;
+  const sa = Math.max(0, 1 - age / 0.5);
+  shock.visible = burstAt >= 0 && sa > 0 && fxI > 0;
+  shock.scale.set(0.25 + age * 3.4, 0.25 + age * 3.4 * 0.75, 1);
+  shock.material.uniforms.uA.value = sa * sa * sa * 0.55;
+  bloom.strength = 0.55 + fl * 0.9;
+  renderer.toneMappingExposure = 1.3 + fl * 0.3;
+  const hh = (now / 1000) * 0.08 % 1;
+  magicLight.color.copy(_hsl.setHSL(0.72 + 0.2 * Math.sin(hh * 6.28), 0.8, 0.6));
+  magicLight.intensity = fxI * (2.5 + FX_U.uBurst.value * 3) + fl * 12;
+  if (glow) glow.intensity = 4.5 * Math.max(THREE.MathUtils.smoothstep(open, 0.1, 0.6), leak * 0.45) * (1 + FX_U.uBurst.value * 0.8) * (0.92 + 0.08 * Math.sin(now / 160)) + fl * 14;
+  updateVacuum(now);
+  updateCloseSeq(now);
+  if (vacStart < 0 && open < 0.05 && FX_U.uSuck.value > 0) { FX_U.uSuck.value = 0; fxI = 0; }
+  const k = FX_U.uSuck.value;
+  column.scale.set(1 - 0.85 * k, 1 - 0.8 * k, 0.6 * (1 - 0.85 * k));
+  column.position.y = 0.44 + 0.8 * column.scale.y;
+  magicLight.intensity *= 1 + 1.5 * k;
+  column.visible = pool.visible = fxI > 0.002;
+  updateLoot(now, dt);
+}
+
+// ---------- treasure artifacts resting in the pile (they ride along with the chest)
+function buildArtifacts(root) {
+  const g = new THREE.Group();
+  g.name = "Artifacts";
+  const silver = new THREE.MeshStandardMaterial({ color: "#dfe4ec", metalness: 1, roughness: 0.16, envMapIntensity: 1.3 });
+  const gold = new THREE.MeshStandardMaterial({ color: "#ffcf4a", metalness: 1, roughness: 0.24, emissive: "#6b4708", emissiveIntensity: 0.25 });
+  const paper = new THREE.MeshStandardMaterial({ color: "#d8c196", roughness: 0.92, metalness: 0 });
+  const paperEdge = new THREE.MeshStandardMaterial({ color: "#a98c5c", roughness: 0.95 });
+  const ribbon = new THREE.MeshStandardMaterial({ color: "#8e1b22", roughness: 0.55 });
+  const wood = new THREE.MeshStandardMaterial({ color: "#4a2a16", roughness: 0.7 });
+  const jewel = (c, r) => {
+    const m = new THREE.Mesh(new THREE.OctahedronGeometry(r, 0), new THREE.MeshPhysicalMaterial({ color: c, roughness: 0, flatShading: true, ior: 2, specularIntensity: 1, clearcoat: 1, emissive: c, emissiveIntensity: 0.5, envMapIntensity: 2.5 }));
+    m.castShadow = true;
+    return m;
+  };
+  const place = (obj, x, z, sink, rot, scale = 1.6) => {
+    obj.scale.multiplyScalar(scale);
+    obj.position.set(x, mound(x, z) - sink * scale, z);
+    obj.rotation.set(rot[0], rot[1], rot[2]);
+    obj.traverse((o) => { if (o.isMesh) { o.castShadow = true; o.receiveShadow = true; } });
+    g.add(obj);
+  };
+
+  // silver goblet: foot, knotted stem, bowl, with a band of small jewels
+  const goblet = new THREE.Group();
+  goblet.add(new THREE.Mesh(new THREE.LatheGeometry([[0, 0], [0.05, 0], [0.052, 0.008], [0.03, 0.018], [0.012, 0.03], [0.011, 0.06], [0.02, 0.07], [0.011, 0.08], [0.012, 0.095],
+    [0.03, 0.105], [0.05, 0.13], [0.058, 0.17], [0.06, 0.2], [0.056, 0.2], [0.053, 0.172], [0.045, 0.135], [0, 0.118]].map(([a, b]) => new THREE.Vector2(a, b)), 32), silver));
+  for (let i = 0; i < 5; i++) {
+    const j = jewel(["#e0103f", "#1f48e8", "#0fb862"][i % 3], 0.009);
+    const a = (i / 5) * Math.PI * 2;
+    j.position.set(Math.cos(a) * 0.056, 0.16, Math.sin(a) * 0.056);
+    goblet.add(j);
+  }
+  place(goblet, -0.27, 0.03, 0.04, [0.15, 0.4, 0.42]);
+
+  // ornate cross: gold bars with orb finials and a ruby heart
+  const cross = new THREE.Group();
+  const bar = (w, h) => new THREE.Mesh(new THREE.BoxGeometry(w, h, 0.016), gold);
+  cross.add(bar(0.026, 0.22));
+  const arm = bar(0.15, 0.026); arm.position.y = 0.05; cross.add(arm);
+  for (const [x, y] of [[0, 0.115], [0, -0.115], [0.078, 0.05], [-0.078, 0.05]]) {
+    const orb = new THREE.Mesh(new THREE.SphereGeometry(0.016, 16, 12), gold); orb.position.set(x, y, 0); cross.add(orb);
+  }
+  const heart = jewel("#e0103f", 0.018); heart.position.set(0, 0.05, 0.012); heart.scale.set(1, 1.3, 0.6); cross.add(heart);
+  place(cross, 0.15, -0.1, -0.06, [-0.65, 0.2, 0.25]);
+
+  // worn parchment scrolls with wooden rods and ribbon ties
+  const scroll = (len) => {
+    const s = new THREE.Group();
+    const body = new THREE.Mesh(new THREE.CylinderGeometry(0.022, 0.022, len, 20), paper); body.rotation.z = Math.PI / 2; s.add(body);
+    for (const sx of [-1, 1]) {
+      const edge = new THREE.Mesh(new THREE.CylinderGeometry(0.0225, 0.0225, 0.012, 20), paperEdge); edge.rotation.z = Math.PI / 2; edge.position.x = sx * (len / 2 - 0.006); s.add(edge);
+      const knob = new THREE.Mesh(new THREE.SphereGeometry(0.012, 12, 8), wood); knob.position.x = sx * (len / 2 + 0.012); s.add(knob);
+    }
+    const tie = new THREE.Mesh(new THREE.TorusGeometry(0.0235, 0.004, 8, 24), ribbon); tie.rotation.y = Math.PI / 2; s.add(tie);
+    const tail = new THREE.Mesh(new THREE.BoxGeometry(0.008, 0.05, 0.002), ribbon); tail.position.set(0.006, -0.03, 0.022); tail.rotation.z = 0.3; s.add(tail);
+    return s;
+  };
+  place(scroll(0.24), 0.02, 0.1, 0.0, [0.1, -0.5, 0.18]);
+  place(scroll(0.19), -0.06, -0.12, -0.03, [0.2, 0.9, 0.7]);
+
+  // small crown studded with gems
+  const crown = new THREE.Group();
+  crown.add(new THREE.Mesh(new THREE.CylinderGeometry(0.06, 0.055, 0.04, 32, 1, true), gold));
+  for (let i = 0; i < 7; i++) {
+    const a = (i / 7) * Math.PI * 2;
+    const spike = new THREE.Mesh(new THREE.ConeGeometry(0.012, 0.045, 6), gold);
+    spike.position.set(Math.cos(a) * 0.058, 0.04, Math.sin(a) * 0.058); crown.add(spike);
+    const tip = new THREE.Mesh(new THREE.SphereGeometry(0.006, 8, 6), gold); tip.position.set(Math.cos(a) * 0.058, 0.064, Math.sin(a) * 0.058); crown.add(tip);
+    const j = jewel(GEM_COLORS[i % GEM_COLORS.length], 0.008); j.position.set(Math.cos(a) * 0.062, 0.0, Math.sin(a) * 0.062); crown.add(j);
+  }
+  place(crown, 0.33, 0.06, 0.0, [0.3, 0, -0.35]);
+
+  // a few big stones sitting in the pile
+  for (const [x, z, c, sz] of [[-0.12, 0.08, "#1f48e8", 0.035], [0.27, -0.1, "#0fb862", 0.03], [-0.36, -0.08, "#8a2be2", 0.028]]) {
+    const j = jewel(c, sz); place(j, x, z, -0.01, [rand(0, 3), rand(0, 3), rand(0, 3)], 1.3);
+  }
+  root.add(g);
+  return g;
+}
+
+// ---------- stage lighting: dark room, one adjustable spotlight on the chest
+const SPOT = { intensity: 1, radius: 1.1, color: new THREE.Color("#ffe2b8"), boost: 1 };
+const spot = new THREE.SpotLight("#ffe2b8", 0, 0, 0.4, 0.75, 1.0);
+spot.position.set(0.35, 3.6, 1.1);
+spot.target.position.set(0, 0.3, 0);
+spot.castShadow = true;
+spot.shadow.mapSize.set(2048, 2048);
+spot.shadow.bias = -0.0003;
+spot.shadow.normalBias = 0.02;
+spot.shadow.camera.near = 1; spot.shadow.camera.far = 8;
+scene.add(spot, spot.target);
+// faint visible beam so the light reads as a stage spot in the dark
+const beam = new THREE.Mesh(new THREE.ConeGeometry(1, 1, 48, 1, true), new THREE.ShaderMaterial({
+  uniforms: { uColor: { value: new THREE.Color() }, uA: { value: 0 } }, transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, side: THREE.DoubleSide,
+  vertexShader: `varying vec2 vUv; void main(){ vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }`,
+  fragmentShader: `uniform vec3 uColor; uniform float uA; varying vec2 vUv;
+    void main(){ float a = uA * smoothstep(0.0, 0.9, 1.0 - vUv.y) * 0.5 * (0.6 + 0.4 * sin(vUv.x * 6.2832 * 3.0)); gl_FragColor = vec4(uColor * a, a); }`,
+}));
+scene.add(beam);
+function applySpot(dt) {
+  const h = spot.position.distanceTo(spot.target.position);
+  spot.angle = Math.min(1.2, Math.atan(SPOT.radius / h));
+  spot.color.copy(SPOT.color);
+  spot.intensity = 26 * SPOT.intensity * SPOT.boost;
+  // beam cone from the light down to the floor
+  const top = spot.position, base = new THREE.Vector3(spot.target.position.x, 0, spot.target.position.z);
+  const len = top.distanceTo(base);
+  beam.position.copy(top).add(base).multiplyScalar(0.5);
+  beam.scale.set(SPOT.radius * 1.05, len, SPOT.radius * 1.05);
+  beam.quaternion.setFromUnitVectors(new THREE.Vector3(0, -1, 0), base.clone().sub(top).normalize());
+  beam.material.uniforms.uColor.value.copy(SPOT.color);
+  beam.material.uniforms.uA.value = 0.12 * SPOT.intensity * SPOT.boost;
+}
+
+// ---------- glints: little star flashes on coins and gems that catch the spotlight
+const GLINTS = 520;
+const glintGeo = new THREE.BufferGeometry();
+const glintPos = new Float32Array(GLINTS * 3), glintA = new Float32Array(GLINTS), glintSeed = new Float32Array(GLINTS);
+for (let i = 0; i < GLINTS; i++) glintSeed[i] = Math.random();
+glintGeo.setAttribute("position", new THREE.BufferAttribute(glintPos, 3));
+glintGeo.setAttribute("aA", new THREE.BufferAttribute(glintA, 1));
+glintGeo.setAttribute("aSeed", new THREE.BufferAttribute(glintSeed, 1));
+const glintMat = new THREE.ShaderMaterial({
+  uniforms: { uScale: FX_U.uScale, uColor: { value: new THREE.Color() } }, transparent: true, depthWrite: false, depthTest: true, blending: THREE.AdditiveBlending,
+  vertexShader: `uniform float uScale; attribute float aA; attribute float aSeed; varying float vA; varying float vRot;
+    void main(){ vec4 mv = modelViewMatrix * vec4(position, 1.0); gl_Position = projectionMatrix * mv; vA = aA; vRot = aSeed * 3.14;
+      gl_PointSize = (0.03 + 0.03 * aSeed) * aA * uScale / max(-mv.z, 0.1); }`,
+  fragmentShader: `uniform vec3 uColor; varying float vA; varying float vRot;
+    void main(){ vec2 c = gl_PointCoord - 0.5; float cs = cos(vRot), sn = sin(vRot); c = mat2(cs, -sn, sn, cs) * c;
+      float s = max(0.0, 1.0 - abs(c.x) * 18.0) * smoothstep(0.5, 0.0, abs(c.y)) + max(0.0, 1.0 - abs(c.y) * 18.0) * smoothstep(0.5, 0.0, abs(c.x));
+      float core = smoothstep(0.12, 0.0, length(c));
+      float a = (s * 0.9 + core) * vA; if (a < 0.01) discard; gl_FragColor = vec4(mix(uColor, vec3(1.0), 0.6) * a * 2.2, a); }`,
+});
+const glints = new THREE.Points(glintGeo, glintMat);
+
+// ---------- inflow: sparks streaming into the chest mouth during the vacuum close (closed form on the GPU)
+const INFLOW = 700;
+const INFLOW_U = { uTime: { value: 0 }, uOn: { value: 0 }, uScale: FX_U.uScale, uMouth: { value: new THREE.Vector3(0, 0.6, 0.06) } };
+const inflowGeo = new THREE.BufferGeometry();
+const inflowSeed = new Float32Array(INFLOW * 4);
+for (let i = 0; i < inflowSeed.length; i++) inflowSeed[i] = Math.random();
+inflowGeo.setAttribute("position", new THREE.BufferAttribute(new Float32Array(INFLOW * 3), 3));
+inflowGeo.setAttribute("aSeed", new THREE.BufferAttribute(inflowSeed, 4));
+const inflow = new THREE.Points(inflowGeo, new THREE.ShaderMaterial({
+  uniforms: INFLOW_U, transparent: true, depthWrite: false, blending: THREE.AdditiveBlending,
+  vertexShader: `uniform float uTime; uniform float uOn; uniform float uScale; uniform vec3 uMouth; attribute vec4 aSeed; varying float vA; varying float vK;
+    void main(){
+      float life = 0.45 + 0.45 * aSeed.x;
+      float ph = fract(uTime / life + aSeed.y);
+      float k = pow(ph, 1.8);                                   // accelerate into the mouth
+      float th = aSeed.z * 6.2832 + k * 2.4;                    // spiral in
+      float el = aSeed.w * 1.15 - 0.15;
+      float r = (0.75 + 0.85 * fract(aSeed.x * 7.31)) * (1.0 - k);
+      vec3 p = uMouth + vec3(cos(th) * cos(el), sin(el) * 0.85 + 0.12 * (1.0 - k), sin(th) * cos(el)) * r;
+      vec4 mv = modelViewMatrix * vec4(p, 1.0); gl_Position = projectionMatrix * mv;
+      vA = uOn * smoothstep(0.0, 0.12, ph) * (1.0 - smoothstep(0.9, 1.0, ph)); vK = k;
+      gl_PointSize = (0.010 + 0.012 * aSeed.y) * (0.6 + 0.9 * k) * uScale / max(-mv.z, 0.1); }`,
+  fragmentShader: `varying float vA; varying float vK;
+    void main(){ float d = length(gl_PointCoord - 0.5); float a = smoothstep(0.5, 0.0, d) * vA; if (a < 0.01) discard;
+      vec3 c = mix(vec3(1.0, 0.72, 0.3), vec3(1.0, 0.95, 0.85), vK); gl_FragColor = vec4(c * a * 2.0, a); }`,
+}));
+inflow.frustumCulled = false; inflow.visible = false; inflow.renderOrder = 7;
+scene.add(inflow);
+glints.frustumCulled = false;
+glints.renderOrder = 6;
+scene.add(glints);
+const pileGlints = Array.from({ length: 70 }, () => { const x = rand(-0.42, 0.42), z = rand(-0.22, 0.22); return new THREE.Vector3(x, mound(x, z) + 0.01, z); });
+const _gv = new THREE.Vector3();
+function updateGlints(now) {
+  const t = now / 1000;
+  const light = SPOT.intensity * SPOT.boost;
+  glintMat.uniforms.uColor.value.copy(SPOT.color);
+  let n = 0;
+  const showPile = current === "rebuilt" && open > 0.3 && models.rebuilt;
+  const emit = (p, rate, seed, gain) => {
+    if (n >= GLINTS) return;
+    // a sharp, brief flash: the facet lines up with the light for a moment
+    const ph = Math.sin(t * rate + seed * 40.0);
+    const a = Math.pow(Math.max(0, ph), 28) * gain * light;
+    glintPos[n * 3] = p.x; glintPos[n * 3 + 1] = p.y; glintPos[n * 3 + 2] = p.z;
+    glintA[n] = Math.min(1.6, a);
+    n++;
+  };
+  for (let i = 0; i < loot.length && n < GLINTS; i++) {
+    const it = loot[i];
+    if (it.recall || it.vac) continue;
+    _gv.copy(it.mesh.position); _gv.y += it.rc;
+    emit(_gv, it.kind === "gem" ? 2.2 + (i % 5) * 0.4 : 1.1 + (i % 3) * 0.3, glintSeed[n], it.kind === "gem" ? 1.2 : 0.8);
+  }
+  if (showPile) for (let i = 0; i < pileGlints.length; i++) { _gv.copy(pileGlints[i]).applyMatrix4(models.rebuilt.matrixWorld); emit(_gv, 1.3 + (i % 4) * 0.35, glintSeed[n], 0.9); }
+  for (let i = n; i < GLINTS; i++) glintA[i] = 0;
+  glintGeo.attributes.position.needsUpdate = true;
+  glintGeo.attributes.aA.needsUpdate = true;
+  glints.visible = current === "rebuilt";
+}
+
+const composer = new EffectComposer(renderer);
+composer.addPass(new RenderPass(scene, camera));
+// clamp HDR spikes (a coin passing right by a light) so bloom stays soft instead of blocky
+composer.addPass(new ShaderPass({
+  uniforms: { tDiffuse: { value: null } },
+  vertexShader: `varying vec2 vUv; void main(){ vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }`,
+  fragmentShader: `uniform sampler2D tDiffuse; varying vec2 vUv; void main(){ vec4 c = texture2D(tDiffuse, vUv); gl_FragColor = vec4(min(c.rgb, vec3(3.0)), c.a); }`,
+}));
+const bloom = new UnrealBloomPass(new THREE.Vector2(innerWidth, innerHeight), 0.55, 0.4, 0.92);
+composer.addPass(bloom);
+composer.addPass(new OutputPass());
+
+// ---------- performance: compile every shader the burst will need up front, so the
+// first open doesn't hitch while the GPU driver builds programs mid-animation
+function prewarm() {
+  const dummies = [new THREE.Mesh(coinGeo, coinMaterial()), new THREE.Mesh(gemGeos[0], gemMaterial(false)), new THREE.Mesh(gemGeos[1], gemMaterial(true))];
+  dummies.forEach((d, i) => { d.position.set(-0.2 + i * 0.2, 0.33, 0); d.scale.setScalar(0.02); d.castShadow = true; fx.add(d); });
+  const vis = [flash.visible, shock.visible, column.visible, pool.visible, glints.visible, inflow.visible];
+  flash.visible = shock.visible = column.visible = pool.visible = glints.visible = inflow.visible = true;
+  // compile against the composer's render target: that's where the scene really draws
+  // (linear output, tone mapping applied later), so the cached programs match exactly
+  renderer.setRenderTarget(composer.readBuffer);
+  renderer.compile(scene, camera);
+  renderer.setRenderTarget(null);
+  composer.render(); // also builds shadow-depth programs and the transmission target
+  [flash.visible, shock.visible, column.visible, pool.visible, glints.visible, inflow.visible] = vis;
+  dummies.forEach((d) => { fx.remove(d); d.material.dispose(); });
+}
+
+// ---------- sizing: keep the chest framed above the tray at any aspect
+const FIT_PULLBACK = 2.0; // default view sits back far enough to see the whole burst and spill
+const DEFAULT_DIR = new THREE.Vector3(-0.62, 0.42, 1.0).normalize();
+let fitPending = true;
+function resize(refit = true) {
+  // a host can load the page in a 0x0 frame before showing it; never fit to that (it gives a NaN camera)
+  const hidden = !(innerWidth > 0 && innerHeight > 0);
+  const w = Math.max(1, innerWidth), h = Math.max(1, innerHeight);
+  renderer.setSize(w, h);
+  composer.setPixelRatio(renderer.getPixelRatio());
+  composer.setSize(w, h);
+  camera.aspect = w / h;
+  const tray = document.querySelector(".tray").getBoundingClientRect().height;
+  camera.setViewOffset(w, h, 0, tray * 0.42, w, h);
+  camera.updateProjectionMatrix();
+  const half = THREE.MathUtils.degToRad(camera.fov / 2);
+  FX_U.uScale.value = h * renderer.getPixelRatio() / (2 * Math.tan(half));
+  if (hidden) { fitPending = true; return; }
+  if (!refit && !fitPending) return;
+  fitPending = false;
+  // 6 m was the old effective cap on tall phones; the pullback doubles whatever the old view was
+  const fit = FIT_PULLBACK * Math.min(6, Math.max(0.8 / Math.tan(half), 1.0 / (Math.tan(half) * camera.aspect)));
+  const dir = camera.position.clone().sub(controls.target);
+  if (!Number.isFinite(dir.lengthSq()) || dir.lengthSq() < 1e-8) dir.copy(DEFAULT_DIR);
+  camera.position.copy(controls.target).add(dir.normalize().multiplyScalar(fit));
+}
+addEventListener("resize", () => resize(true));
+window.__viewer = { camera, controls, BAKE_U, renderer, loot, scene, pose: (t) => { seqStart = -1; animDur = 0; const k = openTimeline(t); setOpen(k.lid); setChestPose(k.rock, k.lift); } };
+resize();
+
+const perf = { last: 0, acc: 0, n: 0, minRatio: 1 };
+function adaptQuality(now) {
+  if (perf.last) {
+    const dt = now - perf.last;
+    if (dt < 250) { perf.acc += dt; perf.n++; } // ignore tab switches
+  }
+  perf.last = now;
+  if (perf.n >= 45) {
+    const avg = perf.acc / perf.n;
+    const pr = renderer.getPixelRatio();
+    if (avg > 28 && pr > perf.minRatio) {
+      renderer.setPixelRatio(Math.max(perf.minRatio, pr - 0.25));
+      resize(false);
+    }
+    perf.acc = 0; perf.n = 0;
+  }
+}
+
+renderer.setAnimationLoop((now) => {
+  adaptQuality(now);
+  if (seqStart >= 0) {
+    const t = now - seqStart;
+    const k = openTimeline(Math.min(t, SEQ_END));
+    setOpen(k.lid);
+    setChestPose(k.rock, k.lift);
+    if (t >= SEQ_END) { seqStart = -1; setOpen(1); setChestPose(0, 0); }
+  } else if (animDur > 0) {
+    const t = Math.min(1, (now - animStart) / animDur);
+    setOpen(animFrom + (target - animFrom) * animEase(t));
+    if (t >= 1) animDur = 0;
+  }
+  updateFX(now);
+  const boostTarget = current === "rebuilt" && (seqStart >= 0 || open > 0.3) ? 1.4 : 1;
+  SPOT.boost += (boostTarget - SPOT.boost) * 0.06;
+  applySpot();
+  updateGlints(now);
+  camera.position.sub(camShakeOff);
+  controls.update();
+  INFLOW_U.uTime.value = now / 1000;
+  camShake *= 0.86;
+  camShakeOff.set(Math.sin(now * 0.091) * camShake, Math.sin(now * 0.137 + 1.3) * camShake * 1.3, Math.sin(now * 0.113 + 2.1) * camShake * 0.6);
+  { const d = camera.position.distanceTo(controls.target); if (Number.isFinite(d)) { scene.fog.near = d + 0.2; scene.fog.far = d + 4.2; } }
+  camera.position.add(camShakeOff);
+  if (FX_U.uFlash.value > 0.05) camera.position.add(new THREE.Vector3(rand(-1, 1), rand(-1, 1), rand(-1, 1)).multiplyScalar(0.012 * FX_U.uFlash.value));
+  composer.render();
+});
+setOpen(0);
+</script>
+
+</body>
+</html>
