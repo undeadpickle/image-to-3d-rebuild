@@ -24,7 +24,7 @@ Same chest, four stages. Top left is the reference image, top right the raw AI s
 
 | | Raw scan | Rebuild |
 |---|---|---|
-| Triangles | 25.9k | 10.9k (including the treasure) |
+| Triangles | 25.9k | 10.9k in Godot including the treasure (16.2k in the web viewer's export) |
 | Mesh | one fused piece | separate parts with a hinged lid |
 
 Moving parts, clean edges and low poly are the point. The scan keeps its job as the measuring stick and the paint source.
