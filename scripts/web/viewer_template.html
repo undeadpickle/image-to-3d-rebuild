@@ -1,0 +1,268 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Asset Viewer</title>
+<!--
+  Phone-friendly three.js viewer for a rebuilt asset with a baked scan paint layer.
+  Template: search for TODO. Patterns in here were each paid for with a bug; keep them:
+   - GLB shipped as base64 text (asset.glb.txt): some hosts (claude.ai artifacts) refuse .glb.
+   - Baked paint on UV2 injected with onBeforeCompile + customProgramCacheKey (shared
+     callbacks otherwise collide in the program cache). r160 declares the uv1 attribute
+     itself (redeclaring it fails to compile) but has no vUv1 varying: add your own.
+   - Bloom via EffectComposer; prewarm() compiles against composer.readBuffer, not the canvas,
+     or every program recompiles on the first big moment (the classic first-open hitch).
+   - Camera fit: pulled back so the whole effect fits; NaN guard for 0x0 first layouts
+     (hosts that load the page hidden); refit only on real resizes, never on UI toggles.
+   - Fog follows camera distance; adaptive pixel ratio; camera shake via offset that is
+     removed before OrbitControls runs (no drift).
+   - All motion from performance.now() + rAF, so a fake clock can step it in tests.
+-->
+<style>
+  :root { --bg: #0b0806; --ink: #f2e7d6; --muted: #b9a88f; --accent: #e0b04f; --panel: #1b1511; }
+  html, body { margin: 0; height: 100%; background: var(--bg); color: var(--ink); font: 15px/1.4 system-ui, sans-serif; overflow: hidden; }
+  canvas { display: block; touch-action: none; }
+  .hud { position: fixed; left: 16px; top: 12px; pointer-events: none; }
+  .hud h1 { margin: 0; font: 600 22px/1.2 Georgia, serif; }
+  .hud p { margin: 2px 0 0; color: var(--muted); font-size: 13px; }
+  .tray { position: fixed; left: 0; right: 0; bottom: 0; padding: 12px 16px calc(12px + env(safe-area-inset-bottom));
+          background: color-mix(in srgb, var(--panel) 92%, transparent); display: flex; gap: 8px; flex-wrap: wrap; justify-content: center; }
+  button { font: 600 15px system-ui; padding: 10px 18px; border-radius: 10px; border: 1px solid #ffffff22; background: #2a211b; color: var(--ink); }
+  button.primary { background: var(--accent); color: #1a1208; border: 0; }
+  [hidden] { display: none !important; }
+  #loader { position: fixed; inset: 0; display: grid; place-items: center; color: var(--muted); }
+</style>
+<script type="importmap">
+{ "imports": {
+  "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+  "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
+} }
+</script>
+</head>
+<body>
+<div class="hud"><h1>TODO Asset name</h1><p>Rebuilt from an AI scan · tap to interact</p></div>
+<div id="loader">Loading…</div>
+<div class="tray"><button id="toggle" class="primary" type="button">Open</button></div>
+<script type="module">
+import * as THREE from "three";
+import { OrbitControls } from "three/addons/controls/OrbitControls.js";
+import { GLTFLoader } from "three/addons/loaders/GLTFLoader.js";
+import { EffectComposer } from "three/addons/postprocessing/EffectComposer.js";
+import { RenderPass } from "three/addons/postprocessing/RenderPass.js";
+import { UnrealBloomPass } from "three/addons/postprocessing/UnrealBloomPass.js";
+import { ShaderPass } from "three/addons/postprocessing/ShaderPass.js";
+import { OutputPass } from "three/addons/postprocessing/OutputPass.js";
+
+const $ = (id) => document.getElementById(id);
+const reduceMotion = matchMedia("(prefers-reduced-motion: reduce)").matches;
+const isPhone = matchMedia("(max-width: 700px)").matches;
+
+// ---------- renderer / scene
+const renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: "high-performance" });
+renderer.setPixelRatio(Math.min(devicePixelRatio, isPhone ? 1.6 : 2));
+renderer.outputColorSpace = THREE.SRGBColorSpace;
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
+renderer.toneMappingExposure = 1.3;
+renderer.shadowMap.enabled = true;
+renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+document.body.prepend(renderer.domElement);
+
+const BG = new THREE.Color("#0b0806");
+const scene = new THREE.Scene();
+scene.background = BG;
+scene.fog = new THREE.Fog(BG, 3, 7);
+const camera = new THREE.PerspectiveCamera(32, 1, 0.05, 50);
+let camShake = 0;
+const camShakeOff = new THREE.Vector3();
+const controls = new OrbitControls(camera, renderer.domElement);
+controls.target.set(0, 0.36, 0);            // TODO: ~40% of the asset height
+camera.position.set(-0.62, 0.78, 1.0);      // direction only; resize() sets the distance
+controls.enableDamping = true;
+controls.minDistance = 1.2; controls.maxDistance = 16;
+controls.maxPolarAngle = Math.PI * 0.49;
+
+// dark stage + soft spotlight
+scene.add(new THREE.HemisphereLight("#ffe8cc", "#1a120c", 0.25));
+const spot = new THREE.SpotLight("#ffe2b8", 60, 9, 0.42, 0.65, 1.6);
+spot.position.set(0.6, 4.2, 1.4);
+spot.castShadow = true; spot.shadow.mapSize.set(1024, 1024); spot.shadow.bias = -0.0004;
+scene.add(spot, spot.target);
+const floor = new THREE.Mesh(new THREE.CircleGeometry(12, 64), new THREE.MeshStandardMaterial({ color: "#1c1510", roughness: 0.9 }));
+floor.rotation.x = -Math.PI / 2; floor.receiveShadow = true;
+scene.add(floor);
+
+// ---------- materials: rebuild exports name each surface by class (wood, metal, …)
+const loadTex = (url, srgb) => new Promise((res) => new THREE.TextureLoader().load(url, (t) => {
+  t.flipY = false; t.colorSpace = srgb ? THREE.SRGBColorSpace : THREE.NoColorSpace; t.anisotropy = 8; res(t);
+}));
+const BAKE_U = { uBakeAlbedo: { value: null }, uBakeOrm: { value: null }, uPaint: { value: 1 } };
+// Baked scan paint (alpha = confidence) mixed over the procedural base on UV2.
+function withBake(mat, key) {
+  mat.onBeforeCompile = (sh) => {
+    Object.assign(sh.uniforms, BAKE_U);
+    sh.vertexShader = sh.vertexShader
+      .replace("#include <common>", "#include <common>\nvarying vec2 vBakeUv;")   // r160 declares uv1 itself; no vUv1
+      .replace("#include <uv_vertex>", "#include <uv_vertex>\nvBakeUv = uv1;");
+    sh.fragmentShader = sh.fragmentShader
+      .replace("#include <common>", "#include <common>\nuniform sampler2D uBakeAlbedo, uBakeOrm; uniform float uPaint; varying vec2 vBakeUv;")
+      .replace("#include <map_fragment>", `#include <map_fragment>
+        vec4 bA = texture2D(uBakeAlbedo, vBakeUv); float bk = bA.a * uPaint;
+        diffuseColor.rgb = mix(diffuseColor.rgb, bA.rgb, bk);`)
+      .replace("#include <roughnessmap_fragment>", `#include <roughnessmap_fragment>
+        vec4 bO = texture2D(uBakeOrm, vBakeUv); roughnessFactor = mix(roughnessFactor, bO.g, bk);`)
+      .replace("#include <metalnessmap_fragment>", `#include <metalnessmap_fragment>
+        metalnessFactor = mix(metalnessFactor, bO.b, bk);`);
+  };
+  mat.customProgramCacheKey = () => "bake-" + key;   // one program per material class
+  return mat;
+}
+const MATS = {   // TODO: one entry per material class in the rebuild
+  wood: withBake(new THREE.MeshStandardMaterial({ color: "#8a5a35", roughness: 0.8 }), "wood"),
+  metal: withBake(new THREE.MeshStandardMaterial({ color: "#b08d4a", roughness: 0.35, metalness: 1 }), "metal"),
+};
+
+// ---------- post: bloom, with HDR spikes clamped so it stays soft
+const composer = new EffectComposer(renderer);
+composer.addPass(new RenderPass(scene, camera));
+composer.addPass(new ShaderPass({
+  uniforms: { tDiffuse: { value: null } },
+  vertexShader: "varying vec2 vUv; void main(){ vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }",
+  fragmentShader: "uniform sampler2D tDiffuse; varying vec2 vUv; void main(){ vec4 c = texture2D(tDiffuse, vUv); gl_FragColor = vec4(min(c.rgb, vec3(3.0)), c.a); }",
+}));
+const bloom = new UnrealBloomPass(new THREE.Vector2(256, 256), 0.55, 0.6, 0.85);
+composer.addPass(bloom);
+composer.addPass(new OutputPass());
+
+// ---------- load
+let asset = null, pivot = null;
+async function loadGlbTxt(url) {
+  const b64 = (await (await fetch(url)).text()).trim();
+  const bin = Uint8Array.from(atob(b64), (c) => c.charCodeAt(0));
+  return new GLTFLoader().parseAsync(bin.buffer, "");
+}
+const [gltf, albedo, orm] = await Promise.all([
+  loadGlbTxt("asset_baked.glb.txt"),          // TODO: base64 of baked.glb
+  loadTex("asset_baked_albedo.webp", true),   // TODO
+  loadTex("asset_baked_orm.webp", false),     // TODO
+]);
+BAKE_U.uBakeAlbedo.value = albedo; BAKE_U.uBakeOrm.value = orm;
+asset = gltf.scene;
+asset.traverse((o) => {
+  if (!o.isMesh) return;
+  const name = (o.material.name || "").replace(/\d+$/, "");   // Godot appends digits on reuse
+  if (MATS[name]) o.material = MATS[name];
+  else {
+    // unmapped class: neutral stand-in (exported stand-ins are white and bloom); add it to MATS
+    console.warn("no material for class", name);
+    o.material = new THREE.MeshStandardMaterial({ color: "#7a746c", roughness: 0.6 });
+  }
+  // note: COLOR_0 carries shader masks (R tint, G edge), not color; MATS leave vertexColors off
+  o.castShadow = o.receiveShadow = true;
+});
+pivot = asset.getObjectByName("LidPivot");   // TODO: the moving part's pivot node, if any
+scene.add(asset);
+$("loader").hidden = true;
+
+// ---------- animation: timelines are pure functions of time (ms) -> pose. See
+// references/animation-principles.md. Keep them deterministic so tests and videos match.
+let state = 0;           // 0 closed, 1 open — TODO: whatever the asset's state is
+let seqStart = -1, seqDir = 1;
+const SEQ_LEN = 900;
+const k01 = (t, a, b) => THREE.MathUtils.clamp((t - a) / (b - a), 0, 1);
+function openTimeline(t) {
+  // anticipation (small dip/strain) -> fast action -> overshoot -> settle (≈50% strength)
+  const strain = 0.03 * Math.sin(Math.PI * k01(t, 0, 220));
+  const go = 1 - Math.pow(1 - k01(t, 220, 420), 3);
+  const settle = t > 420 ? 0.06 * Math.exp(-(t - 420) / 110) * Math.cos(2 * Math.PI * (t - 420) / 300) : 0;
+  return t < 220 ? -strain : go + settle;
+}
+function setPose(v) { if (pivot) pivot.rotation.x = -THREE.MathUtils.degToRad(110) * Math.max(0, v); }
+function toggle() {
+  if (seqStart >= 0) return;
+  seqDir = state > 0.5 ? -1 : 1;
+  seqStart = performance.now();
+  $("toggle").textContent = seqDir > 0 ? "Close" : "Open";
+  if (reduceMotion) { state = seqDir > 0 ? 1 : 0; setPose(state); seqStart = -1; }
+}
+$("toggle").addEventListener("click", toggle);
+const ray = new THREE.Raycaster(), ndc = new THREE.Vector2();
+let downAt = null;
+renderer.domElement.addEventListener("pointerdown", (e) => { downAt = [e.clientX, e.clientY]; });
+renderer.domElement.addEventListener("pointerup", (e) => {
+  if (!downAt || Math.hypot(e.clientX - downAt[0], e.clientY - downAt[1]) > 6) return;  // a drag, not a tap
+  ndc.set(e.clientX / innerWidth * 2 - 1, -(e.clientY / innerHeight) * 2 + 1);
+  ray.setFromCamera(ndc, camera);
+  if (ray.intersectObject(asset, true).length) toggle();
+});
+
+// ---------- performance: compile everything up front against the composer target
+function prewarm() {
+  renderer.setRenderTarget(composer.readBuffer);
+  renderer.compile(scene, camera);
+  renderer.setRenderTarget(null);
+  composer.render();
+}
+const perf = { last: 0, acc: 0, n: 0, minRatio: 1 };
+function adaptQuality(now) {
+  if (perf.last) { const dt = now - perf.last; if (dt < 250) { perf.acc += dt; perf.n++; } }
+  perf.last = now;
+  if (perf.n >= 45) {
+    const pr = renderer.getPixelRatio();
+    if (perf.acc / perf.n > 28 && pr > perf.minRatio) { renderer.setPixelRatio(Math.max(perf.minRatio, pr - 0.25)); resize(false); }
+    perf.acc = 0; perf.n = 0;
+  }
+}
+
+// ---------- sizing
+const FIT_PULLBACK = 2.0;    // room for the whole effect, not just the object
+const DEFAULT_DIR = camera.position.clone().sub(controls.target).normalize();
+let fitPending = true;
+function resize(refit = true) {
+  const hidden = !(innerWidth > 0 && innerHeight > 0);
+  const w = Math.max(1, innerWidth), h = Math.max(1, innerHeight);
+  renderer.setSize(w, h);
+  composer.setPixelRatio(renderer.getPixelRatio());
+  composer.setSize(w, h);
+  camera.aspect = w / h;
+  const tray = document.querySelector(".tray").getBoundingClientRect().height;
+  camera.setViewOffset(w, h, 0, tray * 0.42, w, h);   // keep the asset framed above the tray
+  camera.updateProjectionMatrix();
+  if (hidden) { fitPending = true; return; }
+  if (!refit && !fitPending) return;
+  fitPending = false;
+  const half = THREE.MathUtils.degToRad(camera.fov / 2);
+  const R = 0.8;   // TODO: ~half the asset's largest dimension, in meters
+  const fit = FIT_PULLBACK * Math.min(6, Math.max(R / Math.tan(half), (R * 1.25) / (Math.tan(half) * camera.aspect)));
+  const dir = camera.position.clone().sub(controls.target);
+  if (!Number.isFinite(dir.lengthSq()) || dir.lengthSq() < 1e-8) dir.copy(DEFAULT_DIR);
+  camera.position.copy(controls.target).add(dir.normalize().multiplyScalar(fit));
+}
+addEventListener("resize", () => resize(true));
+resize();
+prewarm();
+
+// debug hook for tests (fake clock: override performance.now + requestAnimationFrame)
+window.__viewer = { THREE, scene, camera, controls, renderer, asset, BAKE_U, toggle, openTimeline };
+
+renderer.setAnimationLoop((now) => {
+  adaptQuality(now);
+  if (seqStart >= 0) {
+    const t = now - seqStart;
+    const v = openTimeline(Math.min(t, SEQ_LEN));
+    state = seqDir > 0 ? v : 1 - v;
+    setPose(state);
+    if (t >= SEQ_LEN) { seqStart = -1; state = seqDir > 0 ? 1 : 0; setPose(state); }
+  }
+  camera.position.sub(camShakeOff);
+  controls.update();
+  camShake *= 0.86;
+  camShakeOff.set(Math.sin(now * 0.091) * camShake, Math.sin(now * 0.137 + 1.3) * camShake * 1.3, 0);
+  const d = camera.position.distanceTo(controls.target);
+  if (Number.isFinite(d)) { scene.fog.near = d + 0.2; scene.fog.far = d + 4.2; }
+  camera.position.add(camShakeOff);
+  composer.render();
+});
+</script>
+</body>
+</html>
