@@ -4,7 +4,11 @@ A [Claude Code](https://claude.com/claude-code) skill (also works in Codex) that
 
 ![Treasure chest demo: tap to open, coins and gems with real physics, vacuum close](media/demo.gif)
 
-[Full demo video (50 s, mp4)](media/treasure_chest_demo.mp4)
+Full demo video (50 s):
+
+https://github.com/user-attachments/assets/30369f14-36e3-4df7-9c90-64d45fc029b0
+
+(Also in the repo: [media/treasure_chest_demo.mp4](media/treasure_chest_demo.mp4).)
 
 An AI scan (Meshy, Tripo or similar) is used only as a reference. The deliverable is a clean rebuild in Godot, with the scan's paint baked on, animation and effects that follow Disney's 12 principles at 50% strength, a phone-friendly three.js web viewer, and a demo video.
 
