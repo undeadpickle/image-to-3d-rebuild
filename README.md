@@ -10,7 +10,9 @@ https://github.com/user-attachments/assets/30369f14-36e3-4df7-9c90-64d45fc029b0
 
 (Also in the repo: [media/treasure_chest_demo.mp4](media/treasure_chest_demo.mp4).)
 
-**[Try the interactive 3D viewer](https://undeadpickle.github.io/image-to-3d-rebuild/)**: tap the chest to open it, watch the loot physics, and switch between the rebuild and the original Meshy scan. It's the web viewer this skill produces (three.js, works on a phone). Source: [docs/](docs/).
+<a href="https://undeadpickle.github.io/image-to-3d-rebuild/"><img src="media/viewer.png" alt="Interactive 3D viewer: click to open" width="720"></a>
+
+**[Try the interactive 3D viewer](https://undeadpickle.github.io/image-to-3d-rebuild/)** (Cmd/Ctrl-click to open it in a new tab): tap the chest to open it, watch the loot physics, and switch between the rebuild and the original Meshy scan. It's the web viewer this skill produces (three.js, works on a phone). Source: [docs/](docs/).
 
 An AI scan (Meshy, Tripo or similar) is used only as a reference. The deliverable is a clean rebuild in Godot, with the scan's paint baked on, animation and effects that follow Disney's 12 principles at 50% strength, a phone-friendly three.js web viewer, and a demo video.
 
