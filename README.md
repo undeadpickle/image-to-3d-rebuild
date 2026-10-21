@@ -20,13 +20,27 @@ The workflow comes from r/aigamedev's "new crazy workflow for making 3D assets".
 
 ## Install
 
-Copy this folder into your Claude Code skills directory:
+Clone this folder into your agent's skills directory.
+
+Claude Code:
 
 ```sh
 git clone https://github.com/undeadpickle/image-to-3d-rebuild ~/.claude/skills/image-to-3d-rebuild
 ```
 
-Then ask Claude to make a 3D model or animated prop from an image.
+Codex (same `SKILL.md` format, so the folder works as is):
+
+```sh
+git clone https://github.com/undeadpickle/image-to-3d-rebuild ~/.codex/skills/image-to-3d-rebuild
+```
+
+Then ask your agent to make a 3D model or animated prop from an image.
+
+To use one copy for both, clone it once and symlink it into the other directory:
+
+```sh
+ln -s ~/.claude/skills/image-to-3d-rebuild ~/.codex/skills/image-to-3d-rebuild
+```
 
 ## Requirements
 
@@ -37,7 +51,7 @@ Then ask Claude to make a 3D model or animated prop from an image.
 
 ## Heads up: `scripts/approver_mcp.py`
 
-This optional script auto-approves permission prompts so a headless `claude -p` run can submit a paid generation you already approved. It only approves a short allowlist and caps submissions, but it is still a permission bypass. Run it only on a prompt you wrote, and keep its tool lists short.
+This optional script is Claude Code only (it targets `claude -p`). It auto-approves permission prompts so a headless `claude -p` run can submit a paid generation you already approved. It only approves a short allowlist and caps submissions, but it is still a permission bypass. Run it only on a prompt you wrote, and keep its tool lists short.
 
 ## License
 
